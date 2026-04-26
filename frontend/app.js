@@ -13,7 +13,8 @@ const LEAFLET_TILE_SIZE = 256;
 const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
 const REPLAY_HEATMAP_RENDER_INTERVAL_MS = 2000;
-const FRONTEND_BUILD = '2026-04-26-rainviewer-radar';
+const MAP_MINI_VISIBLE_RATIO = 0.35;
+const FRONTEND_BUILD = '2026-04-26-map-mini-altitude';
 const DEFAULT_MAP_CONFIG = {
     has_local_tiles: false,
     local_url_template: '/tiles/{z}/{x}/{y}.png',
@@ -81,6 +82,10 @@ const state = {
     replayLastHeatmapRenderAt: 0,
     importantPoints: DEFAULT_IMPORTANT_POINTS,
     importantPointsLoaded: false,
+    mapMiniMode: false,
+    mapPanelTop: 0,
+    mapPanelHeight: 0,
+    mapMiniPlaceholder: null,
 };
 
 const elements = {
@@ -109,6 +114,7 @@ const elements = {
     radarCoverageEnabled: document.getElementById('radar-coverage-enabled'),
     radarOpacity: document.getElementById('radar-opacity'),
     radarOpacityValue: document.getElementById('radar-opacity-value'),
+    mapPanel: document.querySelector('.panel-map'),
     scdpBinsChart: document.getElementById('scdp-bins-chart'),
     icfpBinsChart: document.getElementById('icfp-bins-chart'),
 };
@@ -366,6 +372,14 @@ importantOverlayStatus.onAdd = () => {
     return div;
 };
 importantOverlayStatus.addTo(map);
+
+const flightInfoControl = L.control({ position: 'bottomright' });
+flightInfoControl.onAdd = () => {
+    const div = L.DomUtil.create('div', 'flight-info-status');
+    div.textContent = 'flight --';
+    return div;
+};
+flightInfoControl.addTo(map);
 
 function escapeHtml(value) {
     return String(value)
@@ -687,6 +701,84 @@ function formatDate(value) {
     return `${year}/${month}/${day}`;
 }
 
+function formatMetric(value, digits = 0, suffix = '') {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+        return '--';
+    }
+    return `${number.toFixed(digits)}${suffix}`;
+}
+
+function formatAltitude(data) {
+    if (!data) {
+        return '--';
+    }
+    return formatMetric(data.alt_m, 0, ' m');
+}
+
+function formatTrackTooltip(item) {
+    return [
+        `Time: ${formatClock(item.frame.time)}`,
+        `Alt: ${formatAltitude(item.data)}`,
+        `Speed: ${formatMetric(item.data.speed, 1)}`,
+        `Heading: ${formatMetric(item.data.heading, 0, ' deg')}`,
+    ].join('<br>');
+}
+
+function updateFlightInfo(item) {
+    const node = document.querySelector('.flight-info-status');
+    if (!node) {
+        return;
+    }
+    if (!item) {
+        node.innerHTML = 'Flight<br>Alt --';
+        return;
+    }
+    node.innerHTML = [
+        `<strong>${formatClock(item.frame.time)}</strong>`,
+        `Alt ${formatAltitude(item.data)}`,
+        `Lat ${formatMetric(item.data.lat, 5)}`,
+        `Lon ${formatMetric(item.data.lon, 5)}`,
+    ].join('<br>');
+}
+
+function updateMapMiniMode() {
+    if (!elements.mapPanel) {
+        return;
+    }
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    if (!state.mapMiniMode) {
+        const rect = elements.mapPanel.getBoundingClientRect();
+        state.mapPanelTop = rect.top + window.scrollY;
+        state.mapPanelHeight = rect.height;
+    }
+    const panelTop = state.mapPanelTop;
+    const panelHeight = state.mapPanelHeight || elements.mapPanel.offsetHeight || 1;
+    const panelBottom = panelTop + panelHeight;
+    const viewportTop = window.scrollY;
+    const viewportBottom = viewportTop + viewportHeight;
+    const visibleTop = Math.max(panelTop, viewportTop);
+    const visibleBottom = Math.min(panelBottom, viewportBottom);
+    const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+    const visibleRatio = visibleHeight / panelHeight;
+    const shouldMini = viewportTop > panelTop && visibleRatio < MAP_MINI_VISIBLE_RATIO;
+    const changed = elements.mapPanel.classList.toggle('map-mini', shouldMini);
+    if (changed) {
+        state.mapMiniMode = shouldMini;
+        if (shouldMini) {
+            if (!state.mapMiniPlaceholder) {
+                state.mapMiniPlaceholder = document.createElement('section');
+                state.mapMiniPlaceholder.className = 'panel-map-placeholder grid-map';
+            }
+            state.mapMiniPlaceholder.style.height = `${panelHeight}px`;
+            elements.mapPanel.parentNode.insertBefore(state.mapMiniPlaceholder, elements.mapPanel);
+        } else if (state.mapMiniPlaceholder && state.mapMiniPlaceholder.parentNode) {
+            state.mapMiniPlaceholder.parentNode.removeChild(state.mapMiniPlaceholder);
+        }
+        setTimeout(() => map.invalidateSize(), 80);
+    }
+}
+
 function frameTimeOf(frame) {
     return frame ? frame.time : null;
 }
@@ -874,6 +966,7 @@ function rebuildReplayLayer(replayEntries) {
             fillOpacity: 0.25,
             pane: 'trackPane',
         });
+        marker.bindTooltip(formatTrackTooltip(item), { direction: 'top', opacity: 0.92 });
         trackPointLayer.addLayer(marker);
     });
 }
@@ -1026,6 +1119,7 @@ function updateTrackMap(displayFrames) {
 
     if (!points.length) {
         trackLine.setLatLngs([]);
+        updateFlightInfo(null);
         return;
     }
 
@@ -1033,10 +1127,14 @@ function updateTrackMap(displayFrames) {
 
     const selectedFrame = getSelectedFrame();
     const selectedEntry = entries.find((item) => selectedFrame && item.frame.time === selectedFrame.time);
+    const activeEntry = selectedEntry || entries[entries.length - 1];
     const focusPoint = selectedEntry ? [selectedEntry.data.lat, selectedEntry.data.lon] : points[points.length - 1];
     trackMarker.setLatLng(points[points.length - 1]);
+    trackMarker.bindTooltip(formatTrackTooltip(entries[entries.length - 1]), { direction: 'top', opacity: 0.92 });
     selectedTrackMarker.setLatLng(focusPoint);
     selectedTrackMarker.setStyle({ opacity: 1, fillOpacity: 0.85 });
+    selectedTrackMarker.bindTooltip(formatTrackTooltip(activeEntry), { direction: 'top', opacity: 0.92 });
+    updateFlightInfo(activeEntry);
 
     replayEntries.forEach((item) => {
         const marker = L.circleMarker([item.data.lat, item.data.lon], {
@@ -1053,7 +1151,7 @@ function updateTrackMap(displayFrames) {
             }
             selectFrameByTime(item.frame.time, 'replay');
         });
-        marker.bindTooltip(formatClock(item.frame.time), { direction: 'top', opacity: 0.9 });
+        marker.bindTooltip(formatTrackTooltip(item), { direction: 'top', opacity: 0.92 });
         trackPointLayer.addLayer(marker);
     });
 }
@@ -1074,6 +1172,7 @@ function updateTrackMapFast(displayFrames) {
 
     if (!points.length) {
         trackLine.setLatLngs([]);
+        updateFlightInfo(null);
         if (state.replayLayerSignature !== '0' || state.trackRenderSignature !== '0') {
             trackPointLayer.clearLayers();
             state.replayLayerSignature = '0';
@@ -1089,10 +1188,14 @@ function updateTrackMapFast(displayFrames) {
 
     const selectedFrame = getSelectedFrame();
     const selectedEntry = entries.find((item) => selectedFrame && item.frame.time === selectedFrame.time);
+    const activeEntry = selectedEntry || entries[entries.length - 1];
     const focusPoint = selectedEntry ? [selectedEntry.data.lat, selectedEntry.data.lon] : points[points.length - 1];
     trackMarker.setLatLng(points[points.length - 1]);
+    trackMarker.bindTooltip(formatTrackTooltip(entries[entries.length - 1]), { direction: 'top', opacity: 0.92 });
     selectedTrackMarker.setLatLng(focusPoint);
     selectedTrackMarker.setStyle({ opacity: 1, fillOpacity: 0.85 });
+    selectedTrackMarker.bindTooltip(formatTrackTooltip(activeEntry), { direction: 'top', opacity: 0.92 });
+    updateFlightInfo(activeEntry);
 
     const replaySignature = buildReplayLayerSignature(replayVisualEntries);
     if (replaySignature !== state.replayLayerSignature) {
@@ -1572,7 +1675,14 @@ function bindEvents() {
         pauseMapRefreshByInteraction();
     });
 
-    window.addEventListener('resize', resizeCharts);
+    window.addEventListener('scroll', () => {
+        updateMapMiniMode();
+        pauseMapRefreshByInteraction();
+    }, { passive: true });
+    window.addEventListener('resize', () => {
+        resizeCharts();
+        updateMapMiniMode();
+    });
 }
 
 async function init() {
@@ -1586,7 +1696,10 @@ async function init() {
     setMode('live');
     openWebSocket();
     setInterval(() => refreshRadarLayer(false), RAINVIEWER_API_REFRESH_MS);
-    setTimeout(resizeCharts, 150);
+    setTimeout(() => {
+        resizeCharts();
+        updateMapMiniMode();
+    }, 150);
 }
 
 init();

@@ -160,6 +160,36 @@ body {
     width: 100%;
 }
 
+.panel-map.map-mini {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 1200;
+    width: min(520px, calc(100vw - 48px));
+    height: min(390px, calc(100vh - 48px));
+    padding: 10px;
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgba(15, 23, 42, 0.24);
+}
+
+.panel-map.map-mini .panel-header {
+    margin-bottom: 8px;
+}
+
+.panel-map.map-mini .panel-header h2 {
+    font-size: 14px;
+}
+
+.panel-map.map-mini .panel-header span {
+    font-size: 12px;
+}
+
+.panel-map-placeholder {
+    border: 1px dashed var(--line);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.38);
+}
+
 .grid-map {
     grid-column: 1 / 3;
     grid-row: 1 / 3;
@@ -203,6 +233,12 @@ body {
     min-height: 656px;
     border-radius: 14px;
     overflow: hidden;
+}
+
+.panel-map.map-mini #track-map {
+    height: calc(100% - 34px);
+    min-height: 0;
+    border-radius: 8px;
 }
 
 .important-point-icon-wrapper {
@@ -328,6 +364,18 @@ body {
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.16);
     font-size: 12px;
     line-height: 1.3;
+}
+
+.flight-info-status {
+    padding: 7px 10px;
+    border: 1px solid rgba(15, 23, 42, 0.18);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.94);
+    color: #111827;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.16);
+    font-size: 12px;
+    line-height: 1.35;
+    min-width: 126px;
 }
 
 .rainviewer-radar-layer {
