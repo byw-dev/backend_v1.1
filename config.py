@@ -49,6 +49,13 @@ MAP_ATTRIBUTION = '&copy; OpenStreetMap contributors'
 MAP_SATELLITE_ATTRIBUTION = 'Tiles &copy; Esri'
 MAP_MIN_ZOOM = 4
 MAP_MAX_ZOOM = 19
+RAINVIEWER_API_URL = 'https://api.rainviewer.com/public/weather-maps.json'
+RAINVIEWER_TILE_SIZE = 512
+RAINVIEWER_MAX_NATIVE_ZOOM = 7
+RAINVIEWER_DEFAULT_OPACITY = 0.55
+RAINVIEWER_COLOR_SCHEME = 2
+RAINVIEWER_SMOOTH = 1
+RAINVIEWER_SNOW = 1
 IMPORTANT_POINTS_FILE = Path('reference/important_points.json')
 
 # Track fixed-column mapping

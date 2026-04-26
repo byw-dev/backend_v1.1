@@ -20,6 +20,13 @@ from config import (
     MAP_SATELLITE_ATTRIBUTION,
     MAP_SATELLITE_URL_TEMPLATE,
     MAP_TILES_DIR,
+    RAINVIEWER_API_URL,
+    RAINVIEWER_COLOR_SCHEME,
+    RAINVIEWER_DEFAULT_OPACITY,
+    RAINVIEWER_MAX_NATIVE_ZOOM,
+    RAINVIEWER_SMOOTH,
+    RAINVIEWER_SNOW,
+    RAINVIEWER_TILE_SIZE,
     IMPORTANT_POINTS_FILE,
     MAX_HISTORY_SECONDS,
     MWR_HOLD_SEC,
@@ -264,6 +271,13 @@ def map_config():
         'satellite_attribution': MAP_SATELLITE_ATTRIBUTION,
         'min_zoom': MAP_MIN_ZOOM,
         'max_zoom': MAP_MAX_ZOOM,
+        'rainviewer_api_url': RAINVIEWER_API_URL,
+        'rainviewer_tile_size': RAINVIEWER_TILE_SIZE,
+        'rainviewer_max_native_zoom': RAINVIEWER_MAX_NATIVE_ZOOM,
+        'rainviewer_default_opacity': RAINVIEWER_DEFAULT_OPACITY,
+        'rainviewer_color_scheme': RAINVIEWER_COLOR_SCHEME,
+        'rainviewer_smooth': RAINVIEWER_SMOOTH,
+        'rainviewer_snow': RAINVIEWER_SNOW,
     }
 
 

@@ -8,10 +8,12 @@ const MAX_BIN_DISPLAY_COUNT = 30;
 const MAX_TRACK_RENDER_POINTS = 1800;
 const MAX_REPLAY_MARKERS = 260;
 const MAP_INTERACTION_IDLE_RESUME_MS = 2000;
+const RAINVIEWER_API_REFRESH_MS = 10 * 60 * 1000;
+const LEAFLET_TILE_SIZE = 256;
 const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
 const REPLAY_HEATMAP_RENDER_INTERVAL_MS = 2000;
-const FRONTEND_BUILD = '2026-04-24-map-satellite-switch';
+const FRONTEND_BUILD = '2026-04-26-rainviewer-radar';
 const DEFAULT_MAP_CONFIG = {
     has_local_tiles: false,
     local_url_template: '/tiles/{z}/{x}/{y}.png',
@@ -21,6 +23,13 @@ const DEFAULT_MAP_CONFIG = {
     satellite_attribution: 'Tiles &copy; Esri',
     min_zoom: 4,
     max_zoom: 19,
+    rainviewer_api_url: 'https://api.rainviewer.com/public/weather-maps.json',
+    rainviewer_tile_size: 512,
+    rainviewer_max_native_zoom: 7,
+    rainviewer_default_opacity: 0.55,
+    rainviewer_color_scheme: 2,
+    rainviewer_smooth: 1,
+    rainviewer_snow: 1,
 };
 const DEFAULT_IMPORTANT_POINTS = {
     version: 1,
@@ -60,6 +69,12 @@ const state = {
     mapSource: 'online',
     mapRefreshPaused: false,
     mapRefreshResumeTimer: null,
+    radarEnabled: true,
+    radarCoverageEnabled: false,
+    radarOpacity: DEFAULT_MAP_CONFIG.rainviewer_default_opacity,
+    radarLastApiFetchAt: 0,
+    radarFramePath: '',
+    radarStatus: 'radar --',
     initialMapFitted: false,
     replayLastMapRenderAt: 0,
     replayLastChartRenderAt: 0,
@@ -90,6 +105,10 @@ const elements = {
     showScdpBins: document.getElementById('show-scdp-bins'),
     showIcfpBins: document.getElementById('show-icfp-bins'),
     mapSource: document.getElementById('map-source'),
+    radarOverlayEnabled: document.getElementById('radar-overlay-enabled'),
+    radarCoverageEnabled: document.getElementById('radar-coverage-enabled'),
+    radarOpacity: document.getElementById('radar-opacity'),
+    radarOpacityValue: document.getElementById('radar-opacity-value'),
     scdpBinsChart: document.getElementById('scdp-bins-chart'),
     icfpBinsChart: document.getElementById('icfp-bins-chart'),
 };
@@ -116,10 +135,37 @@ const map = L.map('track-map', {
     zoomAnimation: false,
     fadeAnimation: false,
 }).setView([30, 110], 6);
+map.createPane('fixedPathPane');
+map.getPane('fixedPathPane').style.zIndex = 420;
+map.getPane('fixedPathPane').style.pointerEvents = 'auto';
+map.createPane('fixedPointPane');
+map.getPane('fixedPointPane').style.zIndex = 430;
+map.getPane('fixedPointPane').style.pointerEvents = 'auto';
+map.createPane('fixedTooltipPane');
+map.getPane('fixedTooltipPane').style.zIndex = 455;
+map.getPane('fixedTooltipPane').style.pointerEvents = 'none';
+map.createPane('rainRadarPane');
+map.getPane('rainRadarPane').style.zIndex = 500;
+map.getPane('rainRadarPane').style.pointerEvents = 'none';
+map.createPane('rainCoveragePane');
+map.getPane('rainCoveragePane').style.zIndex = 490;
+map.getPane('rainCoveragePane').style.pointerEvents = 'none';
+map.createPane('trackPane');
+map.getPane('trackPane').style.zIndex = 620;
+map.getPane('trackPane').style.pointerEvents = 'auto';
 map.createPane('importantPathPane');
-map.getPane('importantPathPane').style.zIndex = 650;
+map.getPane('importantPathPane').style.zIndex = 420;
 map.getPane('importantPathPane').style.pointerEvents = 'none';
 let baseTileLayer = null;
+let rainRadarLayer = null;
+let rainRadarCoverageLayer = null;
+const rainRadarStatus = L.control({ position: 'bottomleft' });
+rainRadarStatus.onAdd = () => {
+    const div = L.DomUtil.create('div', 'rain-radar-status');
+    div.textContent = state.radarStatus;
+    return div;
+};
+rainRadarStatus.addTo(map);
 
 function applyBaseTileLayer(source) {
     state.mapSource = source;
@@ -156,18 +202,159 @@ function applyBaseTileLayer(source) {
     }
 }
 
-const trackLine = L.polyline([], { color: '#d9480f', weight: 3 }).addTo(map);
+function updateRadarStatus(text) {
+    state.radarStatus = text;
+    const node = document.querySelector('.rain-radar-status');
+    if (node) {
+        node.textContent = text;
+    }
+}
+
+function setRadarOpacity(opacity) {
+    state.radarOpacity = Math.max(0, Math.min(1, Number(opacity) || 0));
+    if (rainRadarLayer) {
+        rainRadarLayer.setOpacity(state.radarOpacity);
+    }
+    if (elements.radarOpacity) {
+        elements.radarOpacity.value = String(Math.round(state.radarOpacity * 100));
+    }
+    if (elements.radarOpacityValue) {
+        elements.radarOpacityValue.textContent = `${Math.round(state.radarOpacity * 100)}%`;
+    }
+}
+
+function removeRadarLayer(statusText = 'radar off') {
+    if (rainRadarLayer) {
+        map.removeLayer(rainRadarLayer);
+        rainRadarLayer = null;
+    }
+    updateRadarStatus(statusText);
+}
+
+function removeRadarCoverageLayer() {
+    if (rainRadarCoverageLayer) {
+        map.removeLayer(rainRadarCoverageLayer);
+        rainRadarCoverageLayer = null;
+    }
+}
+
+function buildRainViewerTileUrl(host, path) {
+    const cfg = state.mapConfig || DEFAULT_MAP_CONFIG;
+    const tileSize = cfg.rainviewer_tile_size || DEFAULT_MAP_CONFIG.rainviewer_tile_size;
+    const color = cfg.rainviewer_color_scheme || DEFAULT_MAP_CONFIG.rainviewer_color_scheme;
+    const smooth = Number.isFinite(Number(cfg.rainviewer_smooth)) ? Number(cfg.rainviewer_smooth) : DEFAULT_MAP_CONFIG.rainviewer_smooth;
+    const snow = Number.isFinite(Number(cfg.rainviewer_snow)) ? Number(cfg.rainviewer_snow) : DEFAULT_MAP_CONFIG.rainviewer_snow;
+    return `${host}${path}/${tileSize}/{z}/{x}/{y}/${color}/${smooth}_${snow}.png`;
+}
+
+function buildRainViewerCoverageTileUrl(host) {
+    const cfg = state.mapConfig || DEFAULT_MAP_CONFIG;
+    const tileSize = cfg.rainviewer_tile_size || DEFAULT_MAP_CONFIG.rainviewer_tile_size;
+    return `${host}/v2/coverage/0/${tileSize}/{z}/{x}/{y}/0/0_0.png`;
+}
+
+function updateRadarCoverageLayer(host) {
+    removeRadarCoverageLayer();
+    if (!state.radarCoverageEnabled || !host) {
+        return;
+    }
+    const cfg = state.mapConfig || DEFAULT_MAP_CONFIG;
+    rainRadarCoverageLayer = L.tileLayer(buildRainViewerCoverageTileUrl(host), {
+        pane: 'rainCoveragePane',
+        opacity: 0.45,
+        tileSize: LEAFLET_TILE_SIZE,
+        maxNativeZoom: cfg.rainviewer_max_native_zoom || DEFAULT_MAP_CONFIG.rainviewer_max_native_zoom,
+        maxZoom: cfg.max_zoom,
+        keepBuffer: 3,
+        updateWhenZooming: false,
+        updateWhenIdle: true,
+        interactive: false,
+        className: 'rainviewer-radar-layer',
+        attribution: 'Coverage &copy; RainViewer',
+    }).addTo(map);
+}
+
+async function refreshRadarLayer(force = false) {
+    if (!state.radarEnabled && !state.radarCoverageEnabled) {
+        removeRadarLayer('radar off');
+        removeRadarCoverageLayer();
+        return;
+    }
+
+    const now = Date.now();
+    const hasRequestedLayers = (!state.radarEnabled || rainRadarLayer)
+        && (!state.radarCoverageEnabled || rainRadarCoverageLayer);
+    if (!force && hasRequestedLayers && now - state.radarLastApiFetchAt < RAINVIEWER_API_REFRESH_MS) {
+        return;
+    }
+
+    const cfg = state.mapConfig || DEFAULT_MAP_CONFIG;
+    try {
+        const response = await fetch(cfg.rainviewer_api_url, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`status ${response.status}`);
+        }
+        const data = await response.json();
+        const frames = data && data.radar && Array.isArray(data.radar.past) ? data.radar.past : [];
+        const latestFrame = frames[frames.length - 1];
+        if (!latestFrame || !data.host || !latestFrame.path) {
+            throw new Error('missing radar frame');
+        }
+        state.radarLastApiFetchAt = now;
+        updateRadarCoverageLayer(data.host);
+        if (!state.radarEnabled) {
+            removeRadarLayer('radar off');
+            return;
+        }
+        const radarTime = formatClock(new Date(latestFrame.time * 1000).toISOString());
+        if (latestFrame.path === state.radarFramePath && rainRadarLayer) {
+            updateRadarStatus(`radar ${radarTime}`);
+            return;
+        }
+
+        removeRadarLayer('radar loading');
+        state.radarFramePath = latestFrame.path;
+        rainRadarLayer = L.tileLayer(buildRainViewerTileUrl(data.host, latestFrame.path), {
+            pane: 'rainRadarPane',
+            opacity: state.radarOpacity,
+            tileSize: LEAFLET_TILE_SIZE,
+            maxNativeZoom: cfg.rainviewer_max_native_zoom || DEFAULT_MAP_CONFIG.rainviewer_max_native_zoom,
+            maxZoom: cfg.max_zoom,
+            keepBuffer: 3,
+            updateWhenZooming: false,
+            updateWhenIdle: true,
+            interactive: false,
+            className: 'rainviewer-radar-layer',
+            attribution: 'Radar &copy; RainViewer',
+        }).addTo(map);
+        let radarTileErrorCount = 0;
+        rainRadarLayer.on('tileerror', () => {
+            radarTileErrorCount += 1;
+            if (radarTileErrorCount >= 4) {
+                updateRadarStatus('radar tile unavailable');
+            }
+        });
+        updateRadarStatus(`radar ${radarTime}`);
+    } catch (error) {
+        console.warn('[rainviewer] radar layer failed:', error);
+        removeRadarLayer('radar unavailable');
+    }
+}
+
+const trackLine = L.polyline([], { color: '#d9480f', weight: 3, pane: 'trackPane' }).addTo(map);
 const trackMarker = L.circleMarker([0, 0], {
     radius: 4,
     color: '#0f766e',
     fillColor: '#14b8a6',
     fillOpacity: 0.95,
+    pane: 'trackPane',
 }).addTo(map);
 const selectedTrackMarker = L.circleMarker([0, 0], {
     radius: 6,
     color: '#ef4444',
     fillColor: '#fecaca',
     fillOpacity: 0.85,
+    pane: 'trackPane',
 }).addTo(map);
 const trackPointLayer = L.layerGroup().addTo(map);
 const importantPointLayer = L.layerGroup().addTo(map);
@@ -356,6 +543,7 @@ function renderImportantPoints() {
         const marker = L.marker([lat, lon], {
             icon: createImportantPointIcon(style),
             keyboard: false,
+            pane: 'fixedPointPane',
         });
 
         const tooltipContent = `<span style="color:${escapeHtml(style.label_color)};">${escapeHtml(name)}</span>`;
@@ -365,11 +553,13 @@ function renderImportantPoints() {
                 permanent: true,
                 direction: 'top',
                 className: tooltipClass,
+                pane: 'fixedTooltipPane',
             });
         } else {
             marker.bindTooltip(tooltipContent, {
                 direction: 'top',
                 className: tooltipClass,
+                pane: 'fixedTooltipPane',
             });
         }
 
@@ -442,6 +632,7 @@ function renderImportantPoints() {
                     }),
                     keyboard: false,
                     interactive: false,
+                    pane: 'fixedTooltipPane',
                 });
                 importantPathLayer.addLayer(label);
             }
@@ -452,11 +643,13 @@ function renderImportantPoints() {
                 icon: createPathEndpointIcon(style, 'start'),
                 keyboard: false,
                 interactive: false,
+                pane: 'fixedPointPane',
             });
             const endMarker = L.marker(coords[coords.length - 1], {
                 icon: createPathEndpointIcon(style, 'end'),
                 keyboard: false,
                 interactive: false,
+                pane: 'fixedPointPane',
             });
             importantPathLayer.addLayer(startMarker);
             importantPathLayer.addLayer(endMarker);
@@ -679,6 +872,7 @@ function rebuildReplayLayer(replayEntries) {
             weight: 0,
             fillColor: '#ffffff',
             fillOpacity: 0.25,
+            pane: 'trackPane',
         });
         trackPointLayer.addLayer(marker);
     });
@@ -851,6 +1045,7 @@ function updateTrackMap(displayFrames) {
             weight: 1,
             fillColor: '#ffffff',
             fillOpacity: 0.2,
+            pane: 'trackPane',
         });
         marker.on('click', () => {
             if (state.mode === 'live') {
@@ -1207,6 +1402,7 @@ async function loadMapConfig() {
         console.warn('[map-config] fallback to defaults:', error);
         state.mapConfig = { ...DEFAULT_MAP_CONFIG };
     }
+    setRadarOpacity(state.mapConfig.rainviewer_default_opacity);
 
     if (elements.mapSource) {
         const localOption = elements.mapSource.querySelector('option[value="local"]');
@@ -1216,6 +1412,7 @@ async function loadMapConfig() {
         elements.mapSource.disabled = false;
     }
     applyBaseTileLayer(state.mapConfig.has_local_tiles ? 'local' : 'online');
+    refreshRadarLayer(true);
 }
 
 async function loadImportantPoints() {
@@ -1307,6 +1504,23 @@ function bindEvents() {
             applyBaseTileLayer(source === 'local' ? 'local' : (source === 'satellite' ? 'satellite' : 'online'));
         });
     }
+    if (elements.radarOverlayEnabled) {
+        elements.radarOverlayEnabled.addEventListener('change', () => {
+            state.radarEnabled = elements.radarOverlayEnabled.checked;
+            refreshRadarLayer(true);
+        });
+    }
+    if (elements.radarCoverageEnabled) {
+        elements.radarCoverageEnabled.addEventListener('change', () => {
+            state.radarCoverageEnabled = elements.radarCoverageEnabled.checked;
+            refreshRadarLayer(true);
+        });
+    }
+    if (elements.radarOpacity) {
+        elements.radarOpacity.addEventListener('input', () => {
+            setRadarOpacity((Number(elements.radarOpacity.value) || 0) / 100);
+        });
+    }
 
     elements.liveModeBtn.addEventListener('click', () => {
         setMode('live');
@@ -1371,6 +1585,7 @@ async function init() {
     await loadHistory();
     setMode('live');
     openWebSocket();
+    setInterval(() => refreshRadarLayer(false), RAINVIEWER_API_REFRESH_MS);
     setTimeout(resizeCharts, 150);
 }
 

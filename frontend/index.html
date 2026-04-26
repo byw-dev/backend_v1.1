@@ -10,7 +10,7 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin=""
     >
-    <link rel="stylesheet" href="/static/styles.css?v=20260424-map-satellite-switch">
+    <link rel="stylesheet" href="/static/styles.css?v=20260426-rainviewer-radar">
 </head>
 <body>
     <header class="topbar">
@@ -63,6 +63,19 @@
                 <option value="online">在线 OSM</option>
                 <option value="satellite">在线卫星</option>
             </select>
+        </label>
+        <label class="toggle">
+            <input id="radar-overlay-enabled" type="checkbox" checked>
+            <span>Radar</span>
+        </label>
+        <label class="toggle">
+            <input id="radar-coverage-enabled" type="checkbox">
+            <span>Coverage</span>
+        </label>
+        <label class="radar-opacity-wrap">
+            <span>Opacity</span>
+            <input id="radar-opacity" type="range" min="0" max="100" value="55">
+            <span id="radar-opacity-value">55%</span>
         </label>
     </section>
 
@@ -145,6 +158,6 @@
         crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
-    <script src="/static/app.js?v=20260424-map-satellite-switch"></script>
+    <script src="/static/app.js?v=20260426-rainviewer-radar"></script>
 </body>
 </html>
