@@ -1,0 +1,250 @@
+{
+  "version": 1,
+  "type_styles": {
+    "station": {
+      "shape": "circle",
+      "color": "#2563eb",
+      "label_color": "#1e3a8a"
+    },
+    "airport": {
+      "shape": "diamond",
+      "color": "#b45309",
+      "label_color": "#78350f"
+    },
+    "warning": {
+      "shape": "triangle",
+      "color": "#dc2626",
+      "label_color": "#7f1d1d"
+    },
+    "target": {
+      "shape": "square",
+      "color": "#0f766e",
+      "label_color": "#134e4a"
+    }
+  },
+  "path_styles": {
+    "route": {
+      "color": "#7c3aed",
+      "label_color": "#4c1d95",
+      "weight": 4,
+      "opacity": 0.9,
+      "dash_array": null
+    },
+    "restricted": {
+      "color": "#dc2626",
+      "label_color": "#7f1d1d",
+      "weight": 3,
+      "opacity": 0.85,
+      "dash_array": "8 6"
+    }
+  },
+  "points": [
+    {
+      "id": "point-1",
+      "name": "雷州云雷达",
+      "type": "station",
+      "lat": 20.9619,
+      "lon": 110.0678,
+      "description": "Replace this point name/coordinate with your real fixed point.",
+      "show_label": true
+    }
+  ],
+  "paths": [
+    {
+      "id": "path-1",
+      "name": "1号空域",
+      "type": "route",
+      "description": "TODO: replace every lat/lon below with the real fixed path coordinates.",
+      "show_label": true,
+      "show_endpoints": true,
+      "points": [
+        {
+          "lat": 21.4517775,
+          "lon": 109.6814767
+        },
+        {
+          "lat": 21.4428025,
+          "lon": 109.9797220
+        },
+        {
+          "lat": 21.1728639,
+          "lon": 109.9649508
+        },
+        {
+          "lat": 21.1818667,
+          "lon": 109.6775803
+        },
+        {
+          "lat": 21.4517775,
+          "lon": 109.6814767
+        }
+      ]
+    },
+    {
+      "id": "path-2",
+      "name": "2号空域",
+      "type": "route",
+      "description": "TODO: replace every lat/lon below with the real fixed path coordinates.",
+      "show_label": true,
+      "show_endpoints": true,
+      "points": [
+        {
+          "lat": 21.1728639,
+          "lon": 109.9649508
+        },
+        {
+          "lat": 21.1677283,
+          "lon": 110.2654344
+        },
+        {
+          "lat": 20.8959981,
+          "lon": 110.2558581
+        },
+        {
+          "lat": 20.9038194,
+          "lon": 109.9538753
+        },
+        {
+          "lat": 21.1728639,
+          "lon": 109.9649508
+        }
+      ]
+    },
+    {
+      "id": "path-3",
+      "name": "3号空域",
+      "type": "route",
+      "description": "TODO: replace every lat/lon below with the real fixed path coordinates.",
+      "show_label": true,
+      "show_endpoints": true,
+      "points": [
+        {
+          "lat": 21.1818667,
+          "lon": 109.6775803
+        },
+        {
+          "lat": 21.1728639,
+          "lon": 109.9649508
+        },
+        {
+          "lat": 20.9038194,
+          "lon": 109.9538753
+        },
+        {
+          "lat": 20.9119261,
+          "lon": 109.6650447
+        },
+        {
+          "lat": 21.1818667,
+          "lon": 109.6775803
+        }
+      ]
+    },
+    {
+      "id": "path-4",
+      "name": "4号空域",
+      "type": "route",
+      "description": "TODO: replace every lat/lon below with the real fixed path coordinates.",
+      "show_label": true,
+      "show_endpoints": true,
+      "points": [
+        {
+          "lat": 21.1677283,
+          "lon": 110.2654344
+        },
+        {
+          "lat": 21.1553356,
+          "lon": 110.6329319
+        },
+        {
+          "lat": 20.8853403,
+          "lon": 110.6377417
+        },
+        {
+          "lat": 20.8959981,
+          "lon": 110.2558581
+        },
+        {
+          "lat": 21.1677283,
+          "lon": 110.2654344
+        }
+      ]
+    },
+    {
+      "id": "path-5",
+      "name": "5号空域",
+      "type": "route",
+      "description": "TODO: replace every lat/lon below with the real fixed path coordinates.",
+      "show_label": true,
+      "show_endpoints": true,
+      "points": [
+        {
+          "lat": 20.9119261,
+          "lon": 109.6650447
+        },
+        {
+          "lat": 20.9038194,
+          "lon": 109.9538753
+        },
+        {
+          "lat": 20.8959981,
+          "lon": 110.2558581
+        },
+        {
+          "lat": 20.8853403,
+          "lon": 110.6377417
+        },
+        {
+          "lat": 20.6153458,
+          "lon": 110.6430197
+        },
+        {
+          "lat": 20.4290947,
+          "lon": 110.5178383
+        },
+        {
+          "lat": 20.3548056,
+          "lon": 110.5024272
+        },
+        {
+          "lat": 20.2377100,
+          "lon": 110.3132472
+        },
+        {
+          "lat": 20.2036942,
+          "lon": 109.9375281
+        },
+        {
+          "lat": 20.4065142,
+          "lon": 109.8125531
+        },
+        {
+          "lat": 20.6418806,
+          "lon": 109.6525364
+        },
+        {
+          "lat": 20.9119261,
+          "lon": 109.6650447
+        }
+      ]
+    },
+    {
+      "id": "path-2",
+      "name": "Dashed path example - optional",
+      "type": "restricted",
+      "description": "Optional dashed path example. Delete this block if you do not need it.",
+      "show_label": true,
+      "show_endpoints": true,
+      "points": [
+        {
+          "lat": 21.0122,
+          "lon": 110.5261
+        },
+        {
+          "lat": 20.9913,
+          "lon": 110.5122
+        }
+      ]
+    }
+  ]
+}
