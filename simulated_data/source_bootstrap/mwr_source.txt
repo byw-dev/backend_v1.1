@@ -1,0 +1,3 @@
+MWR,Simulator
+53910,Simulator
+DateTime,Station,10,CloudBase(km),Lqint(mm),Vint(mm),SurHum(%),SurTem(C),0.000(km),0.025(km),0.050(km),0.075(km),0.100(km),0.125(km),0.150(km),0.175(km),0.200(km),0.225(km),0.250(km),0.275(km),0.300(km),0.325(km),0.350(km),0.375(km),0.400(km),0.425(km),0.450(km),0.475(km),0.500(km),0.550(km),0.600(km),0.650(km),0.700(km),0.750(km),0.800(km),0.850(km),0.900(km),0.950(km),1.000(km)
