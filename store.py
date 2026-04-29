@@ -14,6 +14,7 @@ class InMemoryStore:
         self.aligned_store: 'OrderedDict[datetime, Any]' = OrderedDict()
 
         self.track_arrival_at: Dict[datetime, datetime] = {}
+        self.mwr_arrival_at: Dict[datetime, datetime] = {}
         self.mwr_pending: Dict[datetime, Dict[str, Any]] = {}
 
         self.file_states = {
@@ -50,6 +51,11 @@ class InMemoryStore:
         while len(data) > self.max_history_seconds:
             data.popitem(last=False)
 
+    def _trim_mwr(self, data: OrderedDict):
+        while len(data) > self.max_history_seconds:
+            oldest_key, _ = data.popitem(last=False)
+            self.mwr_arrival_at.pop(oldest_key, None)
+
     def _trim_track(self, data: OrderedDict):
         while len(data) > self.max_history_seconds:
             oldest_key, _ = data.popitem(last=False)
@@ -68,9 +74,11 @@ class InMemoryStore:
         self.icfp_store[record.time] = record
         self._trim(self.icfp_store)
 
-    def put_mwr(self, record):
+    def put_mwr(self, record, arrival_at: datetime = None):
         self.mwr_store[record.time] = record
-        self._trim(self.mwr_store)
+        if arrival_at is not None:
+            self.mwr_arrival_at[record.time] = arrival_at
+        self._trim_mwr(self.mwr_store)
 
     def put_aligned(self, frame):
         self.aligned_store[frame.time] = frame

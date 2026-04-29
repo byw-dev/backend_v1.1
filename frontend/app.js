@@ -8,13 +8,30 @@ const MAX_BIN_DISPLAY_COUNT = 30;
 const MAX_TRACK_RENDER_POINTS = 1800;
 const MAX_REPLAY_MARKERS = 260;
 const MAP_INTERACTION_IDLE_RESUME_MS = 2000;
+const MAP_MINI_VIEWPORT_MARGIN = 16;
 const RAINVIEWER_API_REFRESH_MS = 10 * 60 * 1000;
 const LEAFLET_TILE_SIZE = 256;
 const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
 const REPLAY_HEATMAP_RENDER_INTERVAL_MS = 2000;
 const MAP_MINI_VISIBLE_RATIO = 0.35;
-const FRONTEND_BUILD = '2026-04-26-map-mini-altitude';
+const FRONTEND_BUILD = '2026-04-27-bin-num-axis';
+const PARTICLE_SERIES_LABELS = {
+    number_conc: '\u6570\u6d53\u5ea6(#/cm^3)',
+    lwc: '\u6db2\u6001\u6c34\u542b\u91cf(g/m^3)',
+    mvd: '\u4e2d\u503c\u4f53\u79ef\u76f4\u5f84(\u03bcm)',
+    ed: '\u6709\u6548\u7c92\u5b50\u76f4\u5f84(\u03bcm)',
+};
+const MWR_SCALAR_LABELS = {
+    sur_tem: '\u673a\u8868\u6e29\u5ea6(\u2103)',
+    sur_hum: '\u673a\u8868\u6e7f\u5ea6(%)',
+    cloud_base_m: '\u4e91\u5e95\u9ad8\u5ea6(m)',
+    vint_mm: '\u79ef\u5206\u6c34\u6c7d(mm)',
+    lqint_mm: '\u79ef\u5206\u6db2\u6001\u6c34(mm)',
+};
+const SCDP_BIN_DIAMETERS_UM = Array.from({ length: SCDP_BIN_DISPLAY_COUNT }, (_, index) => (
+    index < 12 ? index + 2 : 14 + (index - 12) * 2
+));
 const DEFAULT_MAP_CONFIG = {
     has_local_tiles: false,
     local_url_template: '/tiles/{z}/{x}/{y}.png',
@@ -86,6 +103,8 @@ const state = {
     mapPanelTop: 0,
     mapPanelHeight: 0,
     mapMiniPlaceholder: null,
+    mapMiniPosition: null,
+    mapMiniDrag: null,
 };
 
 const elements = {
@@ -98,6 +117,7 @@ const elements = {
     scdpStatus: document.getElementById('scdp-status'),
     icfpStatus: document.getElementById('icfp-status'),
     mwrStatus: document.getElementById('mwr-status'),
+    mwrProfileTime: document.getElementById('mwr-profile-time'),
     selectedTimeLabel: document.getElementById('selected-time-label'),
     windowMinutes: document.getElementById('window-minutes'),
     replayPointSeconds: document.getElementById('replay-point-seconds'),
@@ -772,11 +792,107 @@ function updateMapMiniMode() {
             }
             state.mapMiniPlaceholder.style.height = `${panelHeight}px`;
             elements.mapPanel.parentNode.insertBefore(state.mapMiniPlaceholder, elements.mapPanel);
+            applyMapMiniPosition();
         } else if (state.mapMiniPlaceholder && state.mapMiniPlaceholder.parentNode) {
             state.mapMiniPlaceholder.parentNode.removeChild(state.mapMiniPlaceholder);
+            elements.mapPanel.style.left = '';
+            elements.mapPanel.style.top = '';
+            state.mapMiniDrag = null;
+            elements.mapPanel.classList.remove('map-mini-dragging');
         }
         setTimeout(() => map.invalidateSize(), 80);
+    } else if (shouldMini) {
+        applyMapMiniPosition();
     }
+}
+
+function clampMapMiniPosition(left, top) {
+    const rect = elements.mapPanel.getBoundingClientRect();
+    const width = rect.width || elements.mapPanel.offsetWidth || 1;
+    const height = rect.height || elements.mapPanel.offsetHeight || 1;
+    const maxLeft = Math.max(MAP_MINI_VIEWPORT_MARGIN, window.innerWidth - width - MAP_MINI_VIEWPORT_MARGIN);
+    const maxTop = Math.max(MAP_MINI_VIEWPORT_MARGIN, window.innerHeight - height - MAP_MINI_VIEWPORT_MARGIN);
+    return {
+        left: Math.min(Math.max(left, MAP_MINI_VIEWPORT_MARGIN), maxLeft),
+        top: Math.min(Math.max(top, MAP_MINI_VIEWPORT_MARGIN), maxTop),
+    };
+}
+
+function defaultMapMiniPosition() {
+    const rect = elements.mapPanel.getBoundingClientRect();
+    const width = rect.width || elements.mapPanel.offsetWidth || 520;
+    const height = rect.height || elements.mapPanel.offsetHeight || 390;
+    return clampMapMiniPosition(
+        window.innerWidth - width - 24,
+        window.innerHeight - height - 24,
+    );
+}
+
+function applyMapMiniPosition() {
+    if (!state.mapMiniMode || !elements.mapPanel) {
+        return;
+    }
+    const nextPosition = state.mapMiniPosition
+        ? clampMapMiniPosition(state.mapMiniPosition.left, state.mapMiniPosition.top)
+        : defaultMapMiniPosition();
+    state.mapMiniPosition = nextPosition;
+    elements.mapPanel.style.left = `${nextPosition.left}px`;
+    elements.mapPanel.style.top = `${nextPosition.top}px`;
+}
+
+function beginMapMiniDrag(event) {
+    if (!state.mapMiniMode || !elements.mapPanel || event.button !== 0) {
+        return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = elements.mapPanel.getBoundingClientRect();
+    state.mapMiniDrag = {
+        pointerId: event.pointerId,
+        captureTarget: event.currentTarget,
+        startX: event.clientX,
+        startY: event.clientY,
+        startLeft: rect.left,
+        startTop: rect.top,
+    };
+    elements.mapPanel.classList.add('map-mini-dragging');
+    if (event.currentTarget.setPointerCapture) {
+        event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    pauseMapRefreshByInteraction();
+}
+
+function updateMapMiniDrag(event) {
+    const drag = state.mapMiniDrag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+        return;
+    }
+    event.preventDefault();
+    const nextPosition = clampMapMiniPosition(
+        drag.startLeft + event.clientX - drag.startX,
+        drag.startTop + event.clientY - drag.startY,
+    );
+    state.mapMiniPosition = nextPosition;
+    elements.mapPanel.style.left = `${nextPosition.left}px`;
+    elements.mapPanel.style.top = `${nextPosition.top}px`;
+    pauseMapRefreshByInteraction();
+}
+
+function endMapMiniDrag(event) {
+    const drag = state.mapMiniDrag;
+    if (!drag || drag.pointerId !== event.pointerId) {
+        return;
+    }
+    state.mapMiniDrag = null;
+    elements.mapPanel.classList.remove('map-mini-dragging');
+    if (
+        drag.captureTarget
+        && drag.captureTarget.hasPointerCapture
+        && drag.captureTarget.hasPointerCapture(event.pointerId)
+    ) {
+        drag.captureTarget.releasePointerCapture(event.pointerId);
+    }
+    pauseMapRefreshByInteraction();
 }
 
 function frameTimeOf(frame) {
@@ -1241,19 +1357,22 @@ function renderLineChart(chart, title, frames, seriesDefs, selectedFrame) {
     });
 }
 
-function renderBarChart(chart, title, values, prefix) {
+function renderBarChart(chart, title, values, prefix, options = {}) {
     const normalizedValues = Array.isArray(values)
         ? (prefix === 'Bin ' ? values.slice(0, MAX_BIN_DISPLAY_COUNT) : values)
         : [];
-    const categories = normalizedValues.map((_, idx) => `${prefix}${idx + 1}`);
+    const categories = options.categories || normalizedValues.map((_, idx) => `${prefix}${idx + 1}`);
     chart.setOption({
         animation: false,
         title: { text: title, left: 8, top: 4, textStyle: { fontSize: 14, fontWeight: 'normal' } },
         tooltip: { trigger: 'axis' },
-        grid: { left: 56, right: 20, top: 40, bottom: 54 },
+        grid: { left: 56, right: 20, top: 40, bottom: options.xName ? 68 : 54 },
         xAxis: {
             type: 'category',
             data: categories,
+            name: options.xName || '',
+            nameLocation: 'middle',
+            nameGap: 46,
             axisLabel: { interval: 'auto', rotate: 40, fontSize: 10 },
         },
         yAxis: { type: 'value', scale: true },
@@ -1271,11 +1390,23 @@ function renderProfileChart(chart, title, xName, levels, values, color) {
     const pairs = levels.map((level, idx) => [values ? values[idx] : null, level]);
     chart.setOption({
         animation: false,
-        title: { text: title, left: 8, top: 4, textStyle: { fontSize: 14, fontWeight: 'normal' } },
+        title: { show: false },
         tooltip: { trigger: 'axis' },
-        grid: { left: 64, right: 28, top: 44, bottom: 40 },
-        xAxis: { type: 'value', name: xName, scale: true },
-        yAxis: { type: 'value', name: '高度(m)', min: 0 },
+        grid: { left: 78, right: 28, top: 20, bottom: 58 },
+        xAxis: {
+            type: 'value',
+            name: title,
+            nameLocation: 'middle',
+            nameGap: 36,
+            scale: true,
+        },
+        yAxis: {
+            type: 'value',
+            name: '\u9ad8\u5ea6(m)',
+            nameLocation: 'middle',
+            nameGap: 48,
+            min: 0,
+        },
         series: [{
             type: 'line',
             showSymbol: false,
@@ -1289,10 +1420,10 @@ function renderProfileChart(chart, title, xName, levels, values, color) {
 function updateScdpCharts(selectedFrame, displayFrames) {
     const frames = buildSeriesFrames('scdp', displayFrames);
     renderLineChart(charts.scdpSeries, 'SCDP 单值量', frames, [
-        { name: 'number_conc', getValue: (frame) => frame.scdp.data.number_conc },
-        { name: 'lwc', getValue: (frame) => frame.scdp.data.lwc },
-        { name: 'mvd', getValue: (frame) => frame.scdp.data.mvd },
-        { name: 'ed', getValue: (frame) => frame.scdp.data.ed },
+        { name: PARTICLE_SERIES_LABELS.number_conc, getValue: (frame) => frame.scdp.data.number_conc },
+        { name: PARTICLE_SERIES_LABELS.lwc, getValue: (frame) => frame.scdp.data.lwc },
+        { name: PARTICLE_SERIES_LABELS.mvd, getValue: (frame) => frame.scdp.data.mvd },
+        { name: PARTICLE_SERIES_LABELS.ed, getValue: (frame) => frame.scdp.data.ed },
     ], selectedFrame);
 
     const activeFrame = selectedFrame && selectedFrame.scdp && selectedFrame.scdp.status !== 'missing'
@@ -1301,17 +1432,20 @@ function updateScdpCharts(selectedFrame, displayFrames) {
     const scdpBins = activeFrame && activeFrame.scdp.data && Array.isArray(activeFrame.scdp.data.bins)
         ? activeFrame.scdp.data.bins.slice(0, SCDP_BIN_DISPLAY_COUNT)
         : null;
-    renderBarChart(charts.scdpBins, 'SCDP 滴谱', scdpBins, 'Bin ');
+    renderBarChart(charts.scdpBins, 'Num', scdpBins, '', {
+        categories: SCDP_BIN_DIAMETERS_UM.map(String),
+        xName: '\u7c92\u5f84(\u03bcm)',
+    });
     elements.scdpStatus.textContent = moduleStatusText(activeFrame || selectedFrame, 'scdp');
 }
 
 function updateIcfpCharts(selectedFrame, displayFrames) {
     const frames = buildSeriesFrames('icfp', displayFrames);
     renderLineChart(charts.icfpSeries, 'ICFP 单值量', frames, [
-        { name: 'number_conc', getValue: (frame) => frame.icfp.data.number_conc },
-        { name: 'lwc', getValue: (frame) => frame.icfp.data.lwc },
-        { name: 'mvd', getValue: (frame) => frame.icfp.data.mvd },
-        { name: 'ed', getValue: (frame) => frame.icfp.data.ed },
+        { name: PARTICLE_SERIES_LABELS.number_conc, getValue: (frame) => frame.icfp.data.number_conc },
+        { name: PARTICLE_SERIES_LABELS.lwc, getValue: (frame) => frame.icfp.data.lwc },
+        { name: PARTICLE_SERIES_LABELS.mvd, getValue: (frame) => frame.icfp.data.mvd },
+        { name: PARTICLE_SERIES_LABELS.ed, getValue: (frame) => frame.icfp.data.ed },
     ], selectedFrame);
 
     const activeFrame = selectedFrame && selectedFrame.icfp && selectedFrame.icfp.status !== 'missing'
@@ -1320,18 +1454,18 @@ function updateIcfpCharts(selectedFrame, displayFrames) {
     const icfpBins = activeFrame && activeFrame.icfp.data && Array.isArray(activeFrame.icfp.data.bins)
         ? activeFrame.icfp.data.bins.slice(0, ICFP_BIN_DISPLAY_COUNT)
         : null;
-    renderBarChart(charts.icfpBins, 'ICFP 滴谱', icfpBins, 'Bin ');
+    renderBarChart(charts.icfpBins, 'Num', icfpBins, 'Bin ');
     elements.icfpStatus.textContent = moduleStatusText(activeFrame || selectedFrame, 'icfp');
 }
 
 function updateMwrScalarChart(selectedFrame, displayFrames) {
     const frames = buildSeriesFrames('mwr', displayFrames);
     renderLineChart(charts.mwrScalar, 'MWR 单值量', frames, [
-        { name: 'sur_tem', getValue: (frame) => frame.mwr.data.sur_tem },
-        { name: 'sur_hum', getValue: (frame) => frame.mwr.data.sur_hum },
-        { name: 'cloud_base_km', getValue: (frame) => frame.mwr.data.cloud_base_km },
-        { name: 'vint_mm', getValue: (frame) => frame.mwr.data.vint_mm },
-        { name: 'lqint_mm', getValue: (frame) => frame.mwr.data.lqint_mm },
+        { name: MWR_SCALAR_LABELS.sur_tem, getValue: (frame) => frame.mwr.data.sur_tem },
+        { name: MWR_SCALAR_LABELS.sur_hum, getValue: (frame) => frame.mwr.data.sur_hum },
+        { name: MWR_SCALAR_LABELS.cloud_base_m, getValue: (frame) => frame.mwr.data.cloud_base_km == null ? null : frame.mwr.data.cloud_base_km * 1000 },
+        { name: MWR_SCALAR_LABELS.vint_mm, getValue: (frame) => frame.mwr.data.vint_mm },
+        { name: MWR_SCALAR_LABELS.lqint_mm, getValue: (frame) => frame.mwr.data.lqint_mm },
     ], selectedFrame);
     const activeFrame = selectedFrame && selectedFrame.mwr && selectedFrame.mwr.status !== 'missing'
         ? selectedFrame
@@ -1345,11 +1479,14 @@ function updateMwrProfileCharts(selectedFrame) {
         : latestNonMissingFrame('mwr');
     const levels = activeFrame && activeFrame.mwr.data ? activeFrame.mwr.data.levels_m : [];
     const data = activeFrame && activeFrame.mwr.data ? activeFrame.mwr.data : null;
+    if (elements.mwrProfileTime) {
+        elements.mwrProfileTime.textContent = activeFrame ? formatClock(activeFrame.time) : '--:--:--';
+    }
 
-    renderProfileChart(charts.mwrTempProfile, '温度廓线', '温度', levels, data ? data.temperature_profile : [], '#d9480f');
-    renderProfileChart(charts.mwrHumProfile, '湿度廓线', '湿度', levels, data ? data.humidity_profile : [], '#2563eb');
-    renderProfileChart(charts.mwrVaporProfile, '水汽密度廓线', '水汽密度', levels, data ? data.vapor_density_profile : [], '#0f766e');
-    renderProfileChart(charts.mwrLiquidProfile, '液态水廓线', '液态水', levels, data ? data.liquid_water_profile : [], '#7c3aed');
+    renderProfileChart(charts.mwrTempProfile, '\u6e29\u5ea6\u5ed3\u7ebf', '\u6e29\u5ea6', levels, data ? data.temperature_profile : [], '#d9480f');
+    renderProfileChart(charts.mwrHumProfile, '\u6e7f\u5ea6\u5ed3\u7ebf', '\u6e7f\u5ea6', levels, data ? data.humidity_profile : [], '#2563eb');
+    renderProfileChart(charts.mwrVaporProfile, '\u6c34\u6c7d\u5bc6\u5ea6\u5ed3\u7ebf', '\u6c34\u6c7d\u5bc6\u5ea6', levels, data ? data.vapor_density_profile : [], '#0f766e');
+    renderProfileChart(charts.mwrLiquidProfile, '\u6db2\u6001\u6c34\u5ed3\u7ebf', '\u6db2\u6001\u6c34', levels, data ? data.liquid_water_profile : [], '#7c3aed');
 }
 
 function updateMwrZoneChart(selectedFrame, displayFrames) {
@@ -1378,21 +1515,27 @@ function updateMwrZoneChart(selectedFrame, displayFrames) {
                 return `${xAxis[xIndex] || '--:--:--'}<br>${levels[yIndex] || '--'} m<br>类别 ${params.value[2]}`;
             },
         },
-        grid: { left: 64, right: 28, top: 44, bottom: 58 },
+        grid: { left: 64, right: 28, top: 82, bottom: 40 },
         xAxis: { type: 'category', data: xAxis, axisLabel: { rotate: 35 } },
-        yAxis: { type: 'category', data: levels.map((value) => `${value} m`) },
+        yAxis: {
+            type: 'category',
+            name: '\u9ad8\u5ea6',
+            nameLocation: 'middle',
+            nameGap: 46,
+            data: levels.map((value) => `${value} m`),
+        },
         visualMap: {
             min: -1,
             max: 3,
             orient: 'horizontal',
             left: 'center',
-            bottom: 8,
+            top: 34,
             pieces: [
                 { value: -1, label: 'Filled(no data)', color: 'grey' },
                 { value: 0, label: 'no cloud', color: 'white' },
-                { value: 1, label: 'Type 1', color: 'blue' },
-                { value: 2, label: 'Type 2', color: 'green' },
-                { value: 3, label: 'Type 3', color: 'red' },
+                { value: 1, label: 'e>es>ei', color: 'blue' },
+                { value: 2, label: 'es>e>ei', color: 'green' },
+                { value: 3, label: 'es > ei > e', color: 'red' },
             ],
         },
         series: [{
@@ -1675,6 +1818,14 @@ function bindEvents() {
         pauseMapRefreshByInteraction();
     });
 
+    const mapHeader = elements.mapPanel ? elements.mapPanel.querySelector('.panel-header') : null;
+    if (mapHeader) {
+        mapHeader.addEventListener('pointerdown', beginMapMiniDrag);
+    }
+    window.addEventListener('pointermove', updateMapMiniDrag);
+    window.addEventListener('pointerup', endMapMiniDrag);
+    window.addEventListener('pointercancel', endMapMiniDrag);
+
     window.addEventListener('scroll', () => {
         updateMapMiniMode();
         pauseMapRefreshByInteraction();
@@ -1682,6 +1833,7 @@ function bindEvents() {
     window.addEventListener('resize', () => {
         resizeCharts();
         updateMapMiniMode();
+        applyMapMiniPosition();
     });
 }
 

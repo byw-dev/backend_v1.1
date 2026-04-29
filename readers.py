@@ -358,7 +358,7 @@ def poll_icfp(store):
             store.put_icfp(record)
 
 
-def poll_mwr(store):
+def poll_mwr(store, arrival_at: datetime) -> List[MwrRecord]:
     state = store.file_states['mwr']
     lines = read_appended_lines_if_exists(
         MWR_FILE,
@@ -366,6 +366,7 @@ def poll_mwr(store):
         encoding='utf-8',
         fallback_path=FALLBACK_MWR_FILE,
     )
+    records = []
     for line in lines:
         if not line.strip():
             continue
@@ -383,12 +384,17 @@ def poll_mwr(store):
             continue
         record = parse_mwr_line(line, state['column_map'], store.mwr_pending)
         if record:
-            store.put_mwr(record)
+            store.put_mwr(record, arrival_at=arrival_at)
+            records.append(record)
+    return records
 
 
-def finalize_mwr_pending(store):
+def finalize_mwr_pending(store, arrival_at: datetime) -> List[MwrRecord]:
+    records = []
     for record in flush_stale_mwr_pending(store):
-        store.put_mwr(record)
+        store.put_mwr(record, arrival_at=arrival_at)
+        records.append(record)
+    return records
 
 
 async def poll_all_sources(store):
@@ -396,5 +402,9 @@ async def poll_all_sources(store):
     poll_track(store, arrival_at=arrival_at)
     poll_scdp(store)
     poll_icfp(store)
-    poll_mwr(store)
-    finalize_mwr_pending(store)
+    mwr_records = poll_mwr(store, arrival_at=arrival_at)
+    mwr_records.extend(finalize_mwr_pending(store, arrival_at=arrival_at))
+    return {
+        'arrival_at': arrival_at,
+        'mwr_records': mwr_records,
+    }

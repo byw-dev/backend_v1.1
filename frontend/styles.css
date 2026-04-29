@@ -162,8 +162,6 @@ body {
 
 .panel-map.map-mini {
     position: fixed;
-    right: 24px;
-    bottom: 24px;
     z-index: 1200;
     width: min(520px, calc(100vw - 48px));
     height: min(390px, calc(100vh - 48px));
@@ -174,6 +172,13 @@ body {
 
 .panel-map.map-mini .panel-header {
     margin-bottom: 8px;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+}
+
+.panel-map.map-mini.map-mini-dragging .panel-header {
+    cursor: grabbing;
 }
 
 .panel-map.map-mini .panel-header h2 {

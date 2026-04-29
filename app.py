@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -204,7 +204,22 @@ def load_important_points():
 async def background_loop():
     while True:
         try:
-            await poll_all_sources(store)
+            poll_result = await poll_all_sources(store)
+            backfill_times = set()
+            for mwr_record in poll_result.get('mwr_records', []):
+                start_time = mwr_record.time
+                end_time = start_time + timedelta(seconds=MWR_HOLD_SEC)
+                for t in store.track_store.keys():
+                    if start_time <= t <= end_time and t in store.aligned_store:
+                        backfill_times.add(t)
+
+            for t in sorted(backfill_times):
+                frame = align_one_time(t, store, mwr_hold_sec=MWR_HOLD_SEC)
+                if frame is None:
+                    continue
+                store.put_aligned(frame)
+                await manager.broadcast(frame.to_dict())
+
             now = datetime.now()
             ready_times = []
             for t in list(store.track_store.keys()):
@@ -231,6 +246,14 @@ async def background_loop():
 @app.get('/api/status')
 def status():
     latest = store.latest_aligned()
+    latest_mwr_time = None
+    latest_mwr_arrival_at = None
+    latest_mwr_arrival_lag_sec = None
+    if store.mwr_store:
+        latest_mwr_time = next(reversed(store.mwr_store.keys()))
+        latest_mwr_arrival_at = store.mwr_arrival_at.get(latest_mwr_time)
+        if latest_mwr_arrival_at is not None:
+            latest_mwr_arrival_lag_sec = int((latest_mwr_arrival_at - latest_mwr_time).total_seconds())
     return {
         'track_count': len(store.track_store),
         'scdp_count': len(store.scdp_store),
@@ -240,6 +263,9 @@ def status():
         'max_history_seconds': store.max_history_seconds,
         'poll_interval_sec': POLL_INTERVAL_SEC,
         'latest_time': None if latest is None else latest.time.isoformat(),
+        'latest_mwr_time': None if latest_mwr_time is None else latest_mwr_time.isoformat(),
+        'latest_mwr_arrival_at': None if latest_mwr_arrival_at is None else latest_mwr_arrival_at.isoformat(),
+        'latest_mwr_arrival_lag_sec': latest_mwr_arrival_lag_sec,
         'file_states': store.file_states,
     }
 
@@ -290,7 +316,13 @@ def important_points():
 def index():
     index_file = frontend_dir / 'index.html'
     if index_file.exists():
-        return FileResponse(index_file)
+        return FileResponse(
+            index_file,
+            headers={
+                'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+                'Pragma': 'no-cache',
+            },
+        )
     return {'message': 'Frontend not found.'}
 
 

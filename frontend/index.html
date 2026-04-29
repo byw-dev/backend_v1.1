@@ -10,7 +10,7 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin=""
     >
-    <link rel="stylesheet" href="/static/styles.css?v=20260426-map-mini-altitude">
+    <link rel="stylesheet" href="/static/styles.css?v=20260427-bin-num-axis">
 </head>
 <body>
     <header class="topbar">
@@ -100,7 +100,6 @@
             <section class="panel grid-icfp-bins">
                 <div class="panel-header">
                     <h2>ICFP 滴谱</h2>
-                    <span>所选时次</span>
                 </div>
                 <div id="icfp-bins-chart" class="chart chart-grid-cell"></div>
             </section>
@@ -108,7 +107,6 @@
             <section class="panel grid-scdp-bins">
                 <div class="panel-header">
                     <h2>SCDP 滴谱</h2>
-                    <span>所选时次</span>
                 </div>
                 <div id="scdp-bins-chart" class="chart chart-grid-cell"></div>
             </section>
@@ -133,7 +131,7 @@
         <section class="panel panel-wide">
             <div class="panel-header">
                 <h2>MWR 廓线</h2>
-                <span>最新或所选时次剖面</span>
+                <span id="mwr-profile-time">--:--:--</span>
             </div>
             <div class="profile-grid profile-grid-4">
                 <div id="mwr-temp-profile-chart" class="chart chart-profile"></div>
@@ -158,6 +156,6 @@
         crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
-    <script src="/static/app.js?v=20260426-map-mini-altitude"></script>
+    <script src="/static/app.js?v=20260427-bin-num-axis"></script>
 </body>
 </html>
