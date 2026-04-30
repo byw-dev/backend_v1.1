@@ -1,9 +1,11 @@
 import asyncio
 import json
+import time
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,6 +22,13 @@ from config import (
     MAP_SATELLITE_ATTRIBUTION,
     MAP_SATELLITE_URL_TEMPLATE,
     MAP_TILES_DIR,
+    HIMAWARI_FD_TARGET_TIMES_URL,
+    HIMAWARI_FD_TILE_URL_TEMPLATE,
+    HIMAWARI_JP_TARGET_TIMES_URL,
+    HIMAWARI_JP_TILE_URL_TEMPLATE,
+    HIMAWARI_PRODUCTS,
+    HIMAWARI_PREFERRED_IMAGE_FORMATS,
+    HIMAWARI_REFRESH_SECONDS,
     RAINVIEWER_API_URL,
     RAINVIEWER_COLOR_SCHEME,
     RAINVIEWER_DEFAULT_OPACITY,
@@ -55,6 +64,10 @@ store = InMemoryStore(max_history_seconds=MAX_HISTORY_SECONDS)
 manager = ConnectionManager()
 frontend_dir = Path(__file__).parent / 'frontend'
 tiles_dir = MAP_TILES_DIR
+himawari_cache = {
+    'loaded_at': 0.0,
+    'payload': None,
+}
 
 if frontend_dir.exists():
     app.mount('/static', StaticFiles(directory=frontend_dir), name='static')
@@ -67,6 +80,95 @@ def _parse_float(value):
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _load_himawari_metadata():
+    now = time.time()
+    cached = himawari_cache.get('payload')
+    if cached and now - himawari_cache.get('loaded_at', 0.0) < HIMAWARI_REFRESH_SECONDS:
+        return cached
+
+    fd_base_time, fd_valid_time = _load_himawari_latest_time(HIMAWARI_FD_TARGET_TIMES_URL)
+    jp_base_time, jp_valid_time = _load_himawari_latest_time(HIMAWARI_JP_TARGET_TIMES_URL)
+    fd_image_format = _pick_himawari_image_format(
+        HIMAWARI_FD_TILE_URL_TEMPLATE,
+        fd_base_time,
+        fd_valid_time,
+        5,
+        26,
+        12,
+    )
+    jp_image_format = _pick_himawari_image_format(
+        HIMAWARI_JP_TILE_URL_TEMPLATE,
+        jp_base_time,
+        jp_valid_time,
+        6,
+        53,
+        24,
+    )
+    payload = {
+        'fd': {
+            'base_time': fd_base_time,
+            'valid_time': fd_valid_time,
+            'tile_url_template': HIMAWARI_FD_TILE_URL_TEMPLATE,
+            'image_format': fd_image_format,
+            'min_native_zoom': 3,
+            'max_native_zoom': 5,
+        },
+        'jp': {
+            'base_time': jp_base_time,
+            'valid_time': jp_valid_time,
+            'tile_url_template': HIMAWARI_JP_TILE_URL_TEMPLATE,
+            'image_format': jp_image_format,
+            'min_native_zoom': 6,
+            'max_native_zoom': 6,
+        },
+        'refresh_seconds': HIMAWARI_REFRESH_SECONDS,
+        'products': HIMAWARI_PRODUCTS,
+        'attribution': 'Himawari-9 imagery &copy; JMA',
+    }
+    himawari_cache['loaded_at'] = now
+    himawari_cache['payload'] = payload
+    return payload
+
+
+def _load_himawari_latest_time(target_times_url):
+    response = requests.get(target_times_url, timeout=20)
+    response.raise_for_status()
+    times = response.json()
+    if not isinstance(times, list) or not times:
+        raise ValueError(f'empty Himawari target times: {target_times_url}')
+
+    latest = max(times, key=lambda item: str(item.get('validtime', '')))
+    base_time = latest.get('basetime')
+    valid_time = latest.get('validtime')
+    if not base_time or not valid_time:
+        raise ValueError(f'invalid Himawari latest time payload: {target_times_url}')
+    return base_time, valid_time
+
+
+def _pick_himawari_image_format(tile_url_template, base_time, valid_time, z, x, y):
+    sample_product = HIMAWARI_PRODUCTS[0]
+    for image_format in HIMAWARI_PREFERRED_IMAGE_FORMATS:
+        sample_url = tile_url_template.format(
+            base_time=base_time,
+            valid_time=valid_time,
+            band=sample_product['band'],
+            product=sample_product['product'],
+            z=z,
+            x=x,
+            y=y,
+            format=image_format,
+        )
+        try:
+            response = requests.get(sample_url, timeout=12, stream=True)
+            response.close()
+        except Exception:
+            continue
+        content_type = response.headers.get('content-type', '')
+        if response.status_code < 400 and content_type.startswith('image/'):
+            return image_format
+    return 'jpg'
 
 
 def load_important_points():
@@ -304,7 +406,24 @@ def map_config():
         'rainviewer_color_scheme': RAINVIEWER_COLOR_SCHEME,
         'rainviewer_smooth': RAINVIEWER_SMOOTH,
         'rainviewer_snow': RAINVIEWER_SNOW,
+        'himawari_products': HIMAWARI_PRODUCTS,
+        'himawari_preferred_image_formats': HIMAWARI_PREFERRED_IMAGE_FORMATS,
+        'himawari_refresh_seconds': HIMAWARI_REFRESH_SECONDS,
+        'himawari_native_min_zoom': 3,
+        'himawari_native_max_zoom': 6,
     }
+
+
+@app.get('/api/himawari/latest')
+def himawari_latest():
+    try:
+        return _load_himawari_metadata()
+    except Exception as exc:
+        return {
+            'error': str(exc),
+            'products': HIMAWARI_PRODUCTS,
+            'image_format': 'jpg',
+        }
 
 
 @app.get('/api/important-points')

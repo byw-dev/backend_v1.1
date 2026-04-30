@@ -59,6 +59,28 @@ RAINVIEWER_DEFAULT_OPACITY = 0.55
 RAINVIEWER_COLOR_SCHEME = 2
 RAINVIEWER_SMOOTH = 1
 RAINVIEWER_SNOW = 1
+HIMAWARI_FD_TARGET_TIMES_URL = 'https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes_fd.json'
+HIMAWARI_JP_TARGET_TIMES_URL = 'https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes_jp.json'
+HIMAWARI_FD_TILE_URL_TEMPLATE = 'https://www.jma.go.jp/bosai/himawari/data/satimg/{base_time}/fd/{valid_time}/{band}/{product}/{z}/{x}/{y}.{format}'
+HIMAWARI_JP_TILE_URL_TEMPLATE = 'https://www.jma.go.jp/bosai/himawari/data/satimg/{base_time}/jp/{valid_time}/{band}/{product}/{z}/{x}/{y}.{format}'
+HIMAWARI_PREFERRED_IMAGE_FORMATS = ['png', 'jpg']
+HIMAWARI_REFRESH_SECONDS = 600
+HIMAWARI_PRODUCTS = [
+    {
+        'id': 'infrared_b13',
+        'label': 'Himawari 红外 B13',
+        'band': 'B13',
+        'product': 'TBB',
+        'opacity': 0.72,
+    },
+    {
+        'id': 'visible_b03',
+        'label': 'Himawari 可见光 B03',
+        'band': 'B03',
+        'product': 'ALBD',
+        'opacity': 0.68,
+    },
+]
 IMPORTANT_POINTS_FILE = Path('reference/important_points.json')
 
 # Track fixed-column mapping

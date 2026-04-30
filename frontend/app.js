@@ -10,6 +10,7 @@ const MAX_REPLAY_MARKERS = 260;
 const MAP_INTERACTION_IDLE_RESUME_MS = 2000;
 const MAP_MINI_VIEWPORT_MARGIN = 16;
 const RAINVIEWER_API_REFRESH_MS = 10 * 60 * 1000;
+const HIMAWARI_API_REFRESH_MS = 10 * 60 * 1000;
 const LEAFLET_TILE_SIZE = 256;
 const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
@@ -48,6 +49,13 @@ const DEFAULT_MAP_CONFIG = {
     rainviewer_color_scheme: 2,
     rainviewer_smooth: 1,
     rainviewer_snow: 1,
+    himawari_products: [
+        { id: 'infrared_b13', label: 'Himawari 红外 B13', band: 'B13', product: 'TBB', opacity: 0.72 },
+        { id: 'visible_b03', label: 'Himawari 可见光 B03', band: 'B03', product: 'ALBD', opacity: 0.68 },
+    ],
+    himawari_preferred_image_formats: ['png', 'jpg'],
+    himawari_native_min_zoom: 3,
+    himawari_native_max_zoom: 6,
 };
 const DEFAULT_IMPORTANT_POINTS = {
     version: 1,
@@ -93,6 +101,11 @@ const state = {
     radarLastApiFetchAt: 0,
     radarFramePath: '',
     radarStatus: 'radar --',
+    himawariEnabled: false,
+    himawariProductId: 'infrared_b13',
+    himawariLastApiFetchAt: 0,
+    himawariLayerSignature: '',
+    himawariStatus: 'himawari off',
     initialMapFitted: false,
     replayLastMapRenderAt: 0,
     replayLastChartRenderAt: 0,
@@ -130,6 +143,8 @@ const elements = {
     showScdpBins: document.getElementById('show-scdp-bins'),
     showIcfpBins: document.getElementById('show-icfp-bins'),
     mapSource: document.getElementById('map-source'),
+    himawariProduct: document.getElementById('himawari-product'),
+    himawariOverlayEnabled: document.getElementById('himawari-overlay-enabled'),
     radarOverlayEnabled: document.getElementById('radar-overlay-enabled'),
     radarCoverageEnabled: document.getElementById('radar-coverage-enabled'),
     radarOpacity: document.getElementById('radar-opacity'),
@@ -176,6 +191,9 @@ map.getPane('rainRadarPane').style.pointerEvents = 'none';
 map.createPane('rainCoveragePane');
 map.getPane('rainCoveragePane').style.zIndex = 490;
 map.getPane('rainCoveragePane').style.pointerEvents = 'none';
+map.createPane('himawariPane');
+map.getPane('himawariPane').style.zIndex = 480;
+map.getPane('himawariPane').style.pointerEvents = 'none';
 map.createPane('trackPane');
 map.getPane('trackPane').style.zIndex = 620;
 map.getPane('trackPane').style.pointerEvents = 'auto';
@@ -183,6 +201,7 @@ map.createPane('importantPathPane');
 map.getPane('importantPathPane').style.zIndex = 420;
 map.getPane('importantPathPane').style.pointerEvents = 'none';
 let baseTileLayer = null;
+let himawariLayer = null;
 let rainRadarLayer = null;
 let rainRadarCoverageLayer = null;
 const rainRadarStatus = L.control({ position: 'bottomleft' });
@@ -192,6 +211,20 @@ rainRadarStatus.onAdd = () => {
     return div;
 };
 rainRadarStatus.addTo(map);
+const himawariStatus = L.control({ position: 'bottomleft' });
+himawariStatus.onAdd = () => {
+    const div = L.DomUtil.create('div', 'himawari-status');
+    div.textContent = state.himawariStatus;
+    return div;
+};
+himawariStatus.addTo(map);
+const zoomStatus = L.control({ position: 'bottomleft' });
+zoomStatus.onAdd = () => {
+    const div = L.DomUtil.create('div', 'zoom-status');
+    div.textContent = `zoom ${map.getZoom()}`;
+    return div;
+};
+zoomStatus.addTo(map);
 
 function applyBaseTileLayer(source) {
     state.mapSource = source;
@@ -233,6 +266,177 @@ function updateRadarStatus(text) {
     const node = document.querySelector('.rain-radar-status');
     if (node) {
         node.textContent = text;
+    }
+}
+
+function updateHimawariStatus(text) {
+    state.himawariStatus = text;
+    const node = document.querySelector('.himawari-status');
+    if (node) {
+        node.textContent = text;
+    }
+}
+
+function updateZoomStatus() {
+    const node = document.querySelector('.zoom-status');
+    if (node) {
+        node.textContent = `zoom ${map.getZoom()}`;
+    }
+}
+
+function getHimawariProducts() {
+    const cfg = state.mapConfig || DEFAULT_MAP_CONFIG;
+    return Array.isArray(cfg.himawari_products) && cfg.himawari_products.length
+        ? cfg.himawari_products
+        : DEFAULT_MAP_CONFIG.himawari_products;
+}
+
+function getSelectedHimawariProduct() {
+    const products = getHimawariProducts();
+    return products.find((item) => item.id === state.himawariProductId) || products[0];
+}
+
+function populateHimawariProducts() {
+    if (!elements.himawariProduct) {
+        return;
+    }
+    const products = getHimawariProducts();
+    elements.himawariProduct.innerHTML = '';
+    products.forEach((product) => {
+        const option = document.createElement('option');
+        option.value = product.id;
+        option.textContent = product.label || product.id;
+        elements.himawariProduct.appendChild(option);
+    });
+    if (!products.some((product) => product.id === state.himawariProductId) && products[0]) {
+        state.himawariProductId = products[0].id;
+    }
+    elements.himawariProduct.value = state.himawariProductId;
+    elements.himawariProduct.disabled = !products.length;
+}
+
+function removeHimawariLayer(statusText = 'himawari off') {
+    if (himawariLayer) {
+        map.removeLayer(himawariLayer);
+        himawariLayer = null;
+    }
+    state.himawariLayerSignature = '';
+    updateHimawariStatus(statusText);
+}
+
+function buildHimawariTileUrl(template, metadata, product, z, x, y) {
+    return template
+        .replaceAll('{base_time}', metadata.base_time)
+        .replaceAll('{valid_time}', metadata.valid_time)
+        .replaceAll('{band}', product.band)
+        .replaceAll('{product}', product.product)
+        .replaceAll('{z}', z)
+        .replaceAll('{x}', x)
+        .replaceAll('{y}', y)
+        .replaceAll('{format}', metadata.image_format || 'jpg');
+}
+
+function formatHimawariTime(value) {
+    const text = String(value || '');
+    if (/^\d{14}$/.test(text)) {
+        return `${text.slice(8, 10)}:${text.slice(10, 12)}:${text.slice(12, 14)}`;
+    }
+    return formatClock(value);
+}
+
+async function refreshHimawariLayer(force = false) {
+    if (!state.himawariEnabled) {
+        removeHimawariLayer('himawari off');
+        return;
+    }
+
+    const now = Date.now();
+    if (!force && himawariLayer && now - state.himawariLastApiFetchAt < HIMAWARI_API_REFRESH_MS) {
+        return;
+    }
+
+    const product = getSelectedHimawariProduct();
+    if (!product || !product.band || !product.product) {
+        removeHimawariLayer('himawari product unavailable');
+        return;
+    }
+
+    try {
+        updateHimawariStatus('himawari loading');
+        const response = await fetch('/api/himawari/latest', { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`status ${response.status}`);
+        }
+        const metadata = await response.json();
+        if (metadata.error) {
+            throw new Error(metadata.error);
+        }
+        const fdSource = metadata.fd || metadata;
+        const jpSource = metadata.jp || null;
+        if (!fdSource.base_time || !fdSource.valid_time || !fdSource.tile_url_template) {
+            throw new Error('missing Himawari metadata');
+        }
+        if (!jpSource || !jpSource.base_time || !jpSource.valid_time || !jpSource.tile_url_template) {
+            throw new Error('missing Himawari jp metadata');
+        }
+
+        state.himawariLastApiFetchAt = now;
+        const signature = [
+            fdSource.base_time,
+            fdSource.valid_time,
+            fdSource.image_format || 'jpg',
+            jpSource.base_time,
+            jpSource.valid_time,
+            jpSource.image_format || 'jpg',
+            product.id,
+        ].join('|');
+        if (signature === state.himawariLayerSignature && himawariLayer) {
+            updateHimawariStatus(`himawari fd ${formatHimawariTime(fdSource.valid_time)} / jp ${formatHimawariTime(jpSource.valid_time)}`);
+            return;
+        }
+
+        removeHimawariLayer('himawari loading');
+        state.himawariLayerSignature = signature;
+        himawariLayer = L.tileLayer('', {
+            pane: 'himawariPane',
+            opacity: Number.isFinite(Number(product.opacity)) ? Number(product.opacity) : 0.7,
+            tileSize: LEAFLET_TILE_SIZE,
+            minZoom: Math.min(state.mapConfig.min_zoom, 3),
+            maxZoom: state.mapConfig.max_zoom,
+            minNativeZoom: 3,
+            maxNativeZoom: 6,
+            keepBuffer: 3,
+            updateWhenZooming: false,
+            updateWhenIdle: true,
+            interactive: false,
+            className: 'himawari-layer',
+            attribution: metadata.attribution || 'Himawari imagery &copy; JMA',
+        });
+        himawariLayer.getTileUrl = (coords) => {
+            const nativeZ = Math.max(3, Math.min(6, coords.z));
+            let nativeX = coords.x;
+            let nativeY = coords.y;
+            if (coords.z > nativeZ) {
+                const scale = 2 ** (coords.z - nativeZ);
+                nativeX = Math.floor(coords.x / scale);
+                nativeY = Math.floor(coords.y / scale);
+            }
+            const source = nativeZ >= 6 ? jpSource : fdSource;
+            const sourceZ = nativeZ >= 6 ? 6 : nativeZ;
+            return buildHimawariTileUrl(source.tile_url_template, source, product, sourceZ, nativeX, nativeY);
+        };
+        himawariLayer.addTo(map);
+        let tileErrorCount = 0;
+        himawariLayer.on('tileerror', () => {
+            tileErrorCount += 1;
+            if (tileErrorCount >= 4) {
+                updateHimawariStatus('himawari tile unavailable');
+            }
+        });
+        updateHimawariStatus(`himawari fd ${formatHimawariTime(fdSource.valid_time)} / jp ${formatHimawariTime(jpSource.valid_time)}`);
+    } catch (error) {
+        console.warn('[himawari] layer failed:', error);
+        removeHimawariLayer('himawari unavailable');
     }
 }
 
@@ -1649,6 +1853,7 @@ async function loadMapConfig() {
         state.mapConfig = { ...DEFAULT_MAP_CONFIG };
     }
     setRadarOpacity(state.mapConfig.rainviewer_default_opacity);
+    populateHimawariProducts();
 
     if (elements.mapSource) {
         const localOption = elements.mapSource.querySelector('option[value="local"]');
@@ -1658,6 +1863,7 @@ async function loadMapConfig() {
         elements.mapSource.disabled = false;
     }
     applyBaseTileLayer(state.mapConfig.has_local_tiles ? 'local' : 'online');
+    refreshHimawariLayer(true);
     refreshRadarLayer(true);
 }
 
@@ -1750,6 +1956,19 @@ function bindEvents() {
             applyBaseTileLayer(source === 'local' ? 'local' : (source === 'satellite' ? 'satellite' : 'online'));
         });
     }
+    if (elements.himawariProduct) {
+        elements.himawariProduct.addEventListener('change', () => {
+            state.himawariProductId = elements.himawariProduct.value;
+            refreshHimawariLayer(true);
+        });
+    }
+    if (elements.himawariOverlayEnabled) {
+        state.himawariEnabled = elements.himawariOverlayEnabled.checked;
+        elements.himawariOverlayEnabled.addEventListener('change', () => {
+            state.himawariEnabled = elements.himawariOverlayEnabled.checked;
+            refreshHimawariLayer(true);
+        });
+    }
     if (elements.radarOverlayEnabled) {
         elements.radarOverlayEnabled.addEventListener('change', () => {
             state.radarEnabled = elements.radarOverlayEnabled.checked;
@@ -1817,6 +2036,7 @@ function bindEvents() {
     map.on('movestart move moveend zoomstart zoom zoomend dragstart drag dragend', () => {
         pauseMapRefreshByInteraction();
     });
+    map.on('zoomend viewreset', updateZoomStatus);
 
     const mapHeader = elements.mapPanel ? elements.mapPanel.querySelector('.panel-header') : null;
     if (mapHeader) {
@@ -1839,6 +2059,7 @@ function bindEvents() {
 
 async function init() {
     bindEvents();
+    updateZoomStatus();
     syncReplayPointInterval();
     updateBinVisibility();
     await loadMapConfig();
@@ -1847,6 +2068,7 @@ async function init() {
     await loadHistory();
     setMode('live');
     openWebSocket();
+    setInterval(() => refreshHimawariLayer(false), HIMAWARI_API_REFRESH_MS);
     setInterval(() => refreshRadarLayer(false), RAINVIEWER_API_REFRESH_MS);
     setTimeout(() => {
         resizeCharts();
