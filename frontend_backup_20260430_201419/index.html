@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BY Weather Dashboard</title>
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin=""
+    >
+    <link rel="stylesheet" href="/static/styles.css?v=20260427-bin-num-axis">
+</head>
+<body>
+    <header class="topbar">
+        <div>
+            <h1>机载观测实时显示</h1>
+            <p class="subtitle">轨迹、云滴谱、微波辐射计综合监视面板</p>
+        </div>
+        <div class="status-group">
+            <span class="pill pill-neutral" id="ws-status">连接状态 未连接</span>
+            <span class="pill pill-neutral" id="mode-status">模式 实时刷新</span>
+            <span class="pill pill-neutral" id="latest-time">最新时刻 --:--:--</span>
+            <span class="pill pill-neutral" id="current-date">日期 ----/--/--</span>
+            <span class="pill pill-neutral" id="history-limit">限制时间 60min</span>
+        </div>
+    </header>
+
+    <section class="control-panel">
+        <label>
+            显示时长
+            <input id="window-minutes" type="number" min="1" step="1" value="10">
+            <span>分钟</span>
+        </label>
+        <label>
+            回放点间隔
+            <input id="replay-point-seconds" type="number" min="1" step="1" value="10">
+            <span>秒</span>
+        </label>
+        <button id="apply-window" type="button">应用时长</button>
+        <button id="live-mode-btn" type="button">实时刷新</button>
+        <button id="replay-mode-btn" type="button">历史回放</button>
+        <button id="replay-play-btn" type="button">播放</button>
+        <button id="replay-pause-btn" type="button">暂停</button>
+        <label class="slider-wrap">
+            <span>回放轴</span>
+            <input id="replay-slider" type="range" min="0" max="0" value="0">
+            <span id="selected-time-label">--:--:--</span>
+        </label>
+        <label class="toggle">
+            <input id="show-scdp-bins" type="checkbox" checked>
+            <span>显示 SCDP 滴谱</span>
+        </label>
+        <label class="toggle">
+            <input id="show-icfp-bins" type="checkbox" checked>
+            <span>显示 ICFP 滴谱</span>
+        </label>
+        <label>
+            底图来源
+            <select id="map-source">
+                <option value="local">本地离线</option>
+                <option value="online">在线 OSM</option>
+                <option value="satellite">在线卫星</option>
+            </select>
+        </label>
+        <label>
+            卫星产品
+            <select id="himawari-product">
+                <option value="infrared_b13">Himawari 红外 B13</option>
+                <option value="visible_b03">Himawari 可见光 B03</option>
+            </select>
+        </label>
+        <label class="toggle">
+            <input id="himawari-overlay-enabled" type="checkbox">
+            <span>叠加卫星图像</span>
+        </label>
+        <label class="toggle">
+            <input id="radar-overlay-enabled" type="checkbox" checked>
+            <span>Radar</span>
+        </label>
+        <label class="toggle">
+            <input id="radar-coverage-enabled" type="checkbox">
+            <span>Coverage</span>
+        </label>
+        <label class="radar-opacity-wrap">
+            <span>Opacity</span>
+            <input id="radar-opacity" type="range" min="0" max="100" value="55">
+            <span id="radar-opacity-value">55%</span>
+        </label>
+    </section>
+
+    <main class="dashboard">
+        <section class="overview-grid panel-wide">
+            <section class="panel panel-map grid-map">
+                <div class="panel-header">
+                    <h2>无人机轨迹</h2>
+                    <span id="track-summary">轨迹点 0</span>
+                </div>
+                <div id="track-map"></div>
+            </section>
+
+            <section class="panel grid-mwr-scalar">
+                <div class="panel-header">
+                    <h2>MWR 单值量</h2>
+                    <span id="mwr-status">--</span>
+                </div>
+                <div id="mwr-scalar-chart" class="chart chart-grid-cell"></div>
+            </section>
+
+            <section class="panel grid-icfp-bins">
+                <div class="panel-header">
+                    <h2>ICFP 滴谱</h2>
+                </div>
+                <div id="icfp-bins-chart" class="chart chart-grid-cell"></div>
+            </section>
+
+            <section class="panel grid-scdp-bins">
+                <div class="panel-header">
+                    <h2>SCDP 滴谱</h2>
+                </div>
+                <div id="scdp-bins-chart" class="chart chart-grid-cell"></div>
+            </section>
+        </section>
+
+        <section class="panel panel-wide">
+            <div class="panel-header">
+                <h2>SCDP 时间序列</h2>
+                <span id="scdp-status">--</span>
+            </div>
+            <div id="scdp-series-chart" class="chart chart-medium-wide"></div>
+        </section>
+
+        <section class="panel panel-wide">
+            <div class="panel-header">
+                <h2>ICFP 时间序列</h2>
+                <span id="icfp-status">--</span>
+            </div>
+            <div id="icfp-series-chart" class="chart chart-medium-wide"></div>
+        </section>
+
+        <section class="panel panel-wide">
+            <div class="panel-header">
+                <h2>MWR 廓线</h2>
+                <span id="mwr-profile-time">--:--:--</span>
+            </div>
+            <div class="profile-grid profile-grid-4">
+                <div id="mwr-temp-profile-chart" class="chart chart-profile"></div>
+                <div id="mwr-hum-profile-chart" class="chart chart-profile"></div>
+                <div id="mwr-vapor-profile-chart" class="chart chart-profile"></div>
+                <div id="mwr-liquid-profile-chart" class="chart chart-profile"></div>
+            </div>
+        </section>
+
+        <section class="panel panel-wide">
+            <div class="panel-header">
+                <h2>过冷水汽饱和区</h2>
+                <span>时间-高度填色</span>
+            </div>
+            <div id="mwr-saturated-zone-chart" class="chart chart-heatmap"></div>
+        </section>
+    </main>
+
+    <script
+        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+        crossorigin=""
+    ></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+    <script src="/static/app.js?v=20260427-bin-num-axis"></script>
+</body>
+</html>

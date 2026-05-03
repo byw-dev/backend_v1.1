@@ -16,7 +16,7 @@ const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
 const REPLAY_HEATMAP_RENDER_INTERVAL_MS = 2000;
 const MAP_MINI_VISIBLE_RATIO = 0.35;
-const FRONTEND_BUILD = '2026-05-03-track-zero-filter';
+const FRONTEND_BUILD = '2026-04-27-bin-num-axis';
 const PARTICLE_SERIES_LABELS = {
     number_conc: '\u6570\u6d53\u5ea6(#/cm^3)',
     lwc: '\u6db2\u6001\u6c34\u542b\u91cf(g/m^3)',
@@ -106,7 +106,6 @@ const state = {
     himawariLastApiFetchAt: 0,
     himawariLayerSignature: '',
     himawariStatus: 'himawari off',
-    pendingInteractionResize: false,
     initialMapFitted: false,
     replayLastMapRenderAt: 0,
     replayLastChartRenderAt: 0,
@@ -117,7 +116,6 @@ const state = {
     mapPanelTop: 0,
     mapPanelHeight: 0,
     mapMiniPlaceholder: null,
-    mapMiniHome: null,
     mapMiniPosition: null,
     mapMiniDrag: null,
 };
@@ -786,7 +784,7 @@ function renderImportantPoints() {
             pane: 'fixedPointPane',
         });
 
-        const tooltipContent = `<span>${escapeHtml(name)}</span>`;
+        const tooltipContent = `<span style="color:${escapeHtml(style.label_color)};">${escapeHtml(name)}</span>`;
         const tooltipClass = 'important-point-label';
         if (point.show_label) {
             marker.bindTooltip(tooltipContent, {
@@ -868,7 +866,7 @@ function renderImportantPoints() {
                 const label = L.marker(middle, {
                     icon: L.divIcon({
                         className: 'important-path-label',
-                        html: `<span>${escapeHtml(name)}</span>`,
+                        html: `<span style="color:${escapeHtml(style.label_color)};">${escapeHtml(name)}</span>`,
                     }),
                     keyboard: false,
                     interactive: false,
@@ -973,14 +971,13 @@ function updateMapMiniMode() {
         return;
     }
     const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-    const anchor = state.mapMiniMode && state.mapMiniPlaceholder && state.mapMiniPlaceholder.parentNode
-        ? state.mapMiniPlaceholder
-        : elements.mapPanel;
-    const rect = anchor.getBoundingClientRect();
-    state.mapPanelTop = rect.top + window.scrollY;
-    state.mapPanelHeight = rect.height || elements.mapPanel.offsetHeight || 1;
+    if (!state.mapMiniMode) {
+        const rect = elements.mapPanel.getBoundingClientRect();
+        state.mapPanelTop = rect.top + window.scrollY;
+        state.mapPanelHeight = rect.height;
+    }
     const panelTop = state.mapPanelTop;
-    const panelHeight = state.mapPanelHeight;
+    const panelHeight = state.mapPanelHeight || elements.mapPanel.offsetHeight || 1;
     const panelBottom = panelTop + panelHeight;
     const viewportTop = window.scrollY;
     const viewportBottom = viewportTop + viewportHeight;
@@ -989,72 +986,27 @@ function updateMapMiniMode() {
     const visibleHeight = Math.max(0, visibleBottom - visibleTop);
     const visibleRatio = visibleHeight / panelHeight;
     const shouldMini = viewportTop > panelTop && visibleRatio < MAP_MINI_VISIBLE_RATIO;
-
-    if (shouldMini) {
-        enterMapMiniMode(panelHeight);
-        applyMapMiniPosition();
-        return;
-    }
-
-    exitMapMiniMode();
-}
-
-function enterMapMiniMode(panelHeight) {
-    if (state.mapMiniMode && elements.mapPanel.classList.contains('map-mini')) {
-        if (state.mapMiniPlaceholder) {
+    const changed = elements.mapPanel.classList.toggle('map-mini', shouldMini);
+    if (changed) {
+        state.mapMiniMode = shouldMini;
+        if (shouldMini) {
+            if (!state.mapMiniPlaceholder) {
+                state.mapMiniPlaceholder = document.createElement('section');
+                state.mapMiniPlaceholder.className = 'panel-map-placeholder grid-map';
+            }
             state.mapMiniPlaceholder.style.height = `${panelHeight}px`;
-            state.mapMiniPlaceholder.style.minHeight = `${panelHeight}px`;
+            elements.mapPanel.parentNode.insertBefore(state.mapMiniPlaceholder, elements.mapPanel);
+            applyMapMiniPosition();
+        } else if (state.mapMiniPlaceholder && state.mapMiniPlaceholder.parentNode) {
+            state.mapMiniPlaceholder.parentNode.removeChild(state.mapMiniPlaceholder);
+            elements.mapPanel.style.left = '';
+            elements.mapPanel.style.top = '';
+            state.mapMiniDrag = null;
+            elements.mapPanel.classList.remove('map-mini-dragging');
         }
-        return;
-    }
-    if (!state.mapMiniPlaceholder) {
-        state.mapMiniPlaceholder = document.createElement('section');
-        state.mapMiniPlaceholder.className = 'panel-map-placeholder';
-    }
-    state.mapMiniPlaceholder.style.height = `${panelHeight}px`;
-    state.mapMiniPlaceholder.style.minHeight = `${panelHeight}px`;
-    if (!state.mapMiniPlaceholder.parentNode) {
-        state.mapMiniHome = {
-            parent: elements.mapPanel.parentNode,
-            nextSibling: elements.mapPanel.nextSibling,
-        };
-        elements.mapPanel.parentNode.insertBefore(state.mapMiniPlaceholder, elements.mapPanel);
-    }
-    if (elements.mapPanel.parentNode !== document.body) {
-        document.body.appendChild(elements.mapPanel);
-    }
-    elements.mapPanel.classList.add('map-mini');
-    state.mapMiniMode = true;
-    setTimeout(() => map.invalidateSize(), 80);
-}
-
-function exitMapMiniMode() {
-    if (!elements.mapPanel) {
-        return;
-    }
-    const wasMini = state.mapMiniMode
-        || elements.mapPanel.classList.contains('map-mini')
-        || Boolean(state.mapMiniPlaceholder && state.mapMiniPlaceholder.parentNode);
-    if (state.mapMiniPlaceholder && state.mapMiniPlaceholder.parentNode) {
-        state.mapMiniPlaceholder.parentNode.insertBefore(elements.mapPanel, state.mapMiniPlaceholder);
-    } else if (state.mapMiniHome && state.mapMiniHome.parent) {
-        state.mapMiniHome.parent.insertBefore(elements.mapPanel, state.mapMiniHome.nextSibling);
-    }
-    if (state.mapMiniPlaceholder && state.mapMiniPlaceholder.parentNode) {
-        state.mapMiniPlaceholder.parentNode.removeChild(state.mapMiniPlaceholder);
-    }
-    elements.mapPanel.classList.remove('map-mini', 'map-mini-dragging');
-    elements.mapPanel.style.left = '';
-    elements.mapPanel.style.top = '';
-    elements.mapPanel.style.right = '';
-    elements.mapPanel.style.bottom = '';
-    elements.mapPanel.style.width = '';
-    elements.mapPanel.style.height = '';
-    state.mapMiniMode = false;
-    state.mapMiniHome = null;
-    state.mapMiniDrag = null;
-    if (wasMini) {
         setTimeout(() => map.invalidateSize(), 80);
+    } else if (shouldMini) {
+        applyMapMiniPosition();
     }
 }
 
@@ -1212,19 +1164,12 @@ function getFilteredTrackEntries(frames) {
     const rawEntries = frames
         .map((frame) => frame.track && frame.track.data ? ({ frame, data: frame.track.data }) : null)
         .filter(Boolean)
-        .filter((item) => item.data.lat != null && item.data.lon != null)
-        .filter((item) => {
-            const lat = Number(item.data.lat);
-            const lon = Number(item.data.lon);
-            return Number.isFinite(lat)
-                && Number.isFinite(lon)
-                && !(lat === 0 && lon === 0);
-        });
+        .filter((item) => item.data.lat != null && item.data.lon != null);
 
     const filtered = [];
     let lastValid = null;
     rawEntries.forEach((item) => {
-        const current = { lat: Number(item.data.lat), lon: Number(item.data.lon) };
+        const current = { lat: item.data.lat, lon: item.data.lon };
         if (!lastValid) {
             filtered.push({ ...item, isDirty: false });
             lastValid = current;
@@ -1346,21 +1291,14 @@ function rebuildReplayLayer(replayEntries) {
     });
 }
 
-function pauseMapRefreshByInteraction(options = {}) {
+function pauseMapRefreshByInteraction() {
     state.mapRefreshPaused = true;
-    if (options.resizeOnResume) {
-        state.pendingInteractionResize = true;
-    }
     if (state.mapRefreshResumeTimer) {
         clearTimeout(state.mapRefreshResumeTimer);
     }
     state.mapRefreshResumeTimer = setTimeout(() => {
         state.mapRefreshPaused = false;
         state.mapRefreshResumeTimer = null;
-        if (state.pendingInteractionResize) {
-            state.pendingInteractionResize = false;
-            resizeCharts();
-        }
         forceReplayRenderNow();
         requestRender();
     }, MAP_INTERACTION_IDLE_RESUME_MS);
@@ -1840,20 +1778,6 @@ function resizeCharts() {
     Object.values(charts).forEach((chart) => chart.resize());
 }
 
-function shiftTimelineStrip(direction) {
-    const timelineStrip = document.querySelector('.timeline-strip');
-    if (!timelineStrip) {
-        return;
-    }
-    pauseMapRefreshByInteraction({ resizeOnResume: true });
-    const card = timelineStrip.querySelector('.timeline-card');
-    const step = card ? card.getBoundingClientRect().width + 12 : timelineStrip.clientWidth;
-    timelineStrip.scrollBy({
-        left: direction * step,
-        behavior: 'smooth',
-    });
-}
-
 function requestRender() {
     if (state.renderQueued) {
         return;
@@ -1866,14 +1790,15 @@ function requestRender() {
 }
 
 function renderAll() {
-    if (state.mapRefreshPaused) {
-        return;
-    }
     trimFrames();
     const displayFrames = getDisplayFrames();
     const selectedFrame = getSelectedFrame();
     updateMeta(selectedFrame);
     updateReplayControls();
+
+    if (state.mode === 'replay' && state.mapRefreshPaused) {
+        return;
+    }
 
     if (state.mode !== 'replay') {
         updateTrackMapFast(displayFrames);
@@ -2130,26 +2055,6 @@ function bindEvents() {
         updateMapMiniMode();
         applyMapMiniPosition();
     });
-    const timelineStrip = document.querySelector('.timeline-strip');
-    if (timelineStrip) {
-        timelineStrip.addEventListener('scroll', () => {
-            pauseMapRefreshByInteraction({ resizeOnResume: true });
-        }, { passive: true });
-    }
-    const rightStack = document.querySelector('.right-stack');
-    if (rightStack) {
-        rightStack.addEventListener('scroll', () => {
-            pauseMapRefreshByInteraction({ resizeOnResume: true });
-        }, { passive: true });
-    }
-    const timelinePrev = document.querySelector('.timeline-cue-left');
-    const timelineNext = document.querySelector('.timeline-cue-right');
-    if (timelinePrev) {
-        timelinePrev.addEventListener('click', () => shiftTimelineStrip(-1));
-    }
-    if (timelineNext) {
-        timelineNext.addEventListener('click', () => shiftTimelineStrip(1));
-    }
 }
 
 async function init() {
