@@ -1,6 +1,6 @@
 from typing import Optional
 
-from config import MWR_LEVELS_M
+from config import ICFP_LOOKBACK_SEC, MWR_LEVELS_M
 from models import AlignedFrame, ModuleValue, MwrRecord
 from mwr_saturation import identify_saturated_zones
 
@@ -77,13 +77,23 @@ def _mwr_module_value(t, mwr_record: Optional[MwrRecord], source_time, age_sec):
     )
 
 
-def align_one_time(t, store, mwr_hold_sec: int = 15):
+def _latest_icfp_before_or_at(t, store, lookback_sec: int):
+    for it in reversed(list(store.icfp_store.keys())):
+        if it <= t:
+            age_sec = int((t - it).total_seconds())
+            if age_sec <= lookback_sec:
+                return store.icfp_store[it], it.isoformat(), age_sec
+            break
+    return None, None, None
+
+
+def align_one_time(t, store, mwr_hold_sec: int = 15, icfp_lookback_sec: int = ICFP_LOOKBACK_SEC):
     track = store.track_store.get(t)
     if track is None:
         return None
 
     scdp = store.scdp_store.get(t)
-    icfp = store.icfp_store.get(t)
+    icfp, icfp_source_time, icfp_age_sec = _latest_icfp_before_or_at(t, store, icfp_lookback_sec)
 
     mwr_record = None
     mwr_source_time = None
@@ -129,6 +139,8 @@ def align_one_time(t, store, mwr_hold_sec: int = 15):
                 'ed': icfp.ed,
                 'bins': icfp.bins,
             },
+            source_time=icfp_source_time,
+            age_sec=icfp_age_sec,
         ),
         mwr=_mwr_module_value(t, mwr_record, mwr_source_time, age_sec),
     )

@@ -9,8 +9,8 @@ SOURCE_MWR_FILE = Path('G:/WR_YMWR/B11/20260303/Z_UPAR_I_59134_20260303000000_P_
 # Realtime simulator output files.
 SIM_OUTPUT_DIR = Path('simulated_data')
 
-DATE1 = "2026-05-03"
-DATE2 = "20260503"
+DATE1 = "2026-05-04"
+DATE2 = "20260504"
 NUM = 1
 TRACK_FILE = Path(f'G:/B11/{DATE1}_{NUM}/{DATE2}_{NUM}_B11.csv')
 SCDP_FILE = Path(f'G:/B11/{DATE1}_{NUM}/WR_SCDP/SCDP_B11_{DATE2}.csv')
@@ -25,6 +25,7 @@ ALLOW_SIMULATED_FALLBACK = False
 POLL_INTERVAL_SEC = 0.5
 ALIGN_DELAY_SEC = 2.0
 MWR_HOLD_SEC = 15
+ICFP_LOOKBACK_SEC = 300
 MAX_HISTORY_SECONDS = 3600
 
 # Simulation behavior
@@ -41,6 +42,7 @@ TRACK_SIM_SKIP_SECONDS = SIM_SKIP_SECONDS
 # Network
 HOST = '127.0.0.1'
 PORT = 8000
+AUTO_OPEN_BROWSER = True
 
 # Map tiles
 # Put offline tiles under this directory using {z}/{x}/{y}.png layout.

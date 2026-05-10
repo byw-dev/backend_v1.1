@@ -336,6 +336,7 @@ def poll_scdp(store):
 
 def poll_icfp(store):
     state = store.file_states['icfp']
+    records = []
     lines = read_appended_lines_if_exists(
         ICFP_FILE,
         state,
@@ -356,6 +357,8 @@ def poll_icfp(store):
         record = parse_icfp_line(line, state['column_map'])
         if record:
             store.put_icfp(record)
+            records.append(record)
+    return records
 
 
 def poll_mwr(store, arrival_at: datetime) -> List[MwrRecord]:
@@ -401,10 +404,11 @@ async def poll_all_sources(store):
     arrival_at = datetime.now()
     poll_track(store, arrival_at=arrival_at)
     poll_scdp(store)
-    poll_icfp(store)
+    icfp_records = poll_icfp(store)
     mwr_records = poll_mwr(store, arrival_at=arrival_at)
     mwr_records.extend(finalize_mwr_pending(store, arrival_at=arrival_at))
     return {
         'arrival_at': arrival_at,
+        'icfp_records': icfp_records,
         'mwr_records': mwr_records,
     }

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import time
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
@@ -37,6 +38,7 @@ from config import (
     RAINVIEWER_SNOW,
     RAINVIEWER_TILE_SIZE,
     IMPORTANT_POINTS_FILE,
+    ICFP_LOOKBACK_SEC,
     MAX_HISTORY_SECONDS,
     MWR_HOLD_SEC,
     POLL_INTERVAL_SEC,
@@ -62,8 +64,19 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title='Aircraft Realtime Visualization Backend v1', lifespan=lifespan)
 store = InMemoryStore(max_history_seconds=MAX_HISTORY_SECONDS)
 manager = ConnectionManager()
-frontend_dir = Path(__file__).parent / 'frontend'
-tiles_dir = MAP_TILES_DIR
+
+
+def _runtime_base_dir() -> Path:
+    return Path(os.environ.get('BY_WEATHER_BASE_DIR', Path(__file__).parent)).resolve()
+
+
+def _runtime_path(path: Path) -> Path:
+    path = Path(path)
+    return path if path.is_absolute() else _runtime_base_dir() / path
+
+
+frontend_dir = _runtime_base_dir() / 'frontend'
+tiles_dir = _runtime_path(MAP_TILES_DIR)
 himawari_cache = {
     'loaded_at': 0.0,
     'payload': None,
@@ -180,7 +193,7 @@ def load_important_points():
         'paths': [],
         'warnings': [],
     }
-    source_path = IMPORTANT_POINTS_FILE
+    source_path = _runtime_path(IMPORTANT_POINTS_FILE)
     payload['source_file'] = str(source_path)
 
     if not source_path.exists():
@@ -308,6 +321,13 @@ async def background_loop():
         try:
             poll_result = await poll_all_sources(store)
             backfill_times = set()
+            for icfp_record in poll_result.get('icfp_records', []):
+                start_time = icfp_record.time
+                end_time = start_time + timedelta(seconds=ICFP_LOOKBACK_SEC)
+                for t in store.track_store.keys():
+                    if start_time <= t <= end_time and t in store.aligned_store:
+                        backfill_times.add(t)
+
             for mwr_record in poll_result.get('mwr_records', []):
                 start_time = mwr_record.time
                 end_time = start_time + timedelta(seconds=MWR_HOLD_SEC)
@@ -316,7 +336,12 @@ async def background_loop():
                         backfill_times.add(t)
 
             for t in sorted(backfill_times):
-                frame = align_one_time(t, store, mwr_hold_sec=MWR_HOLD_SEC)
+                frame = align_one_time(
+                    t,
+                    store,
+                    mwr_hold_sec=MWR_HOLD_SEC,
+                    icfp_lookback_sec=ICFP_LOOKBACK_SEC,
+                )
                 if frame is None:
                     continue
                 store.put_aligned(frame)
@@ -332,7 +357,12 @@ async def background_loop():
                     ready_times.append(t)
 
             for t in sorted(ready_times):
-                frame = align_one_time(t, store, mwr_hold_sec=MWR_HOLD_SEC)
+                frame = align_one_time(
+                    t,
+                    store,
+                    mwr_hold_sec=MWR_HOLD_SEC,
+                    icfp_lookback_sec=ICFP_LOOKBACK_SEC,
+                )
                 if frame is None:
                     continue
                 store.put_aligned(frame)
