@@ -96,6 +96,52 @@
                     <input id="radar-opacity" type="range" min="0" max="100" value="55">
                     <span id="radar-opacity-value">55%</span>
                 </label>
+                <label class="toggle">
+                    <input id="measure-distance-enabled" type="checkbox">
+                    <span>测距</span>
+                </label>
+                <button id="measure-distance-undo" type="button">撤销测距点</button>
+                <button id="measure-distance-clear" type="button">清除测距</button>
+                <label class="toggle">
+                    <input id="anchor-point-enabled" type="checkbox">
+                    <span>锚点</span>
+                </label>
+                <button id="anchor-list-open" type="button">锚点列表</button>
+                <button id="anchor-clear" type="button">清除锚点</button>
+                <label>
+                    <span>锚点大小</span>
+                    <input id="anchor-size" type="number" min="16" max="60" step="1" value="28">
+                    <span>px</span>
+                </label>
+                <label>
+                    <span>锚点海拔</span>
+                    <input id="anchor-altitude" type="number" step="0.1" value="197.0">
+                    <span>m</span>
+                </label>
+                <label>
+                    <span>特定符</span>
+                    <input id="anchor-symbol" type="number" step="1" value="0">
+                </label>
+                <label class="toggle">
+                    <input id="area-boundary-enabled" type="checkbox">
+                    <span>区域限定</span>
+                </label>
+                <label class="boundary-input">
+                    <span>左边界</span>
+                    <input id="boundary-left" type="text" placeholder="经度">
+                </label>
+                <label class="boundary-input">
+                    <span>右边界</span>
+                    <input id="boundary-right" type="text" placeholder="经度">
+                </label>
+                <label class="boundary-input">
+                    <span>上边界</span>
+                    <input id="boundary-top" type="text" placeholder="纬度">
+                </label>
+                <label class="boundary-input">
+                    <span>下边界</span>
+                    <input id="boundary-bottom" type="text" placeholder="纬度">
+                </label>
             </div>
 
             <div class="rail-section">
@@ -222,12 +268,45 @@
         </section>
     </main>
 
+    <div id="anchor-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="anchor-modal-title">
+        <section class="modal-window anchor-modal-window">
+            <header class="modal-header">
+                <h2 id="anchor-modal-title">锚点列表</h2>
+                <button id="anchor-modal-close" class="modal-icon-button" type="button" aria-label="关闭">×</button>
+            </header>
+            <div class="anchor-table-wrap">
+                <table class="anchor-table">
+                    <thead>
+                        <tr>
+                            <th>编号</th>
+                            <th>经度</th>
+                            <th>纬度</th>
+                            <th>海拔</th>
+                            <th>特定符</th>
+                            <th>创建时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="anchor-table-body">
+                        <tr>
+                            <td colspan="6">暂无锚点</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <footer class="modal-actions">
+                <button id="anchor-export-txt" type="button">导出 TXT</button>
+                <button id="anchor-modal-clear" type="button">清除锚点</button>
+                <button id="anchor-modal-close-secondary" type="button">关闭</button>
+            </footer>
+        </section>
+    </div>
+
     <script
         src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
         integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
         crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
-    <script src="/static/app.js?v=20260503-track-zero-filter"></script>
+    <script src="/static/app.js?v=20260517-area-boundary"></script>
 </body>
 </html>

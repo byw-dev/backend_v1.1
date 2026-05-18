@@ -16,7 +16,8 @@ const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
 const REPLAY_HEATMAP_RENDER_INTERVAL_MS = 2000;
 const MAP_MINI_VISIBLE_RATIO = 0.35;
-const FRONTEND_BUILD = '2026-05-03-track-zero-filter';
+const FRONTEND_BUILD = '2026-05-17-area-boundary';
+const AREA_BOUNDARY_WARNING_DEG = 0.02;
 const PARTICLE_SERIES_LABELS = {
     number_conc: '\u6570\u6d53\u5ea6(#/cm^3)',
     lwc: '\u6db2\u6001\u6c34\u542b\u91cf(g/m^3)',
@@ -120,6 +121,23 @@ const state = {
     mapMiniHome: null,
     mapMiniPosition: null,
     mapMiniDrag: null,
+    measureDistanceEnabled: false,
+    measurePoints: [],
+    measureTotalMeters: 0,
+    anchorPointEnabled: false,
+    anchorPoints: [],
+    nextAnchorId: 1,
+    anchorSizePx: 28,
+    anchorAltitudeM: 197.0,
+    anchorSymbol: '0',
+    areaBoundaryEnabled: false,
+    areaBoundary: {
+        left: null,
+        right: null,
+        top: null,
+        bottom: null,
+        errors: [],
+    },
 };
 
 const elements = {
@@ -151,6 +169,26 @@ const elements = {
     radarCoverageEnabled: document.getElementById('radar-coverage-enabled'),
     radarOpacity: document.getElementById('radar-opacity'),
     radarOpacityValue: document.getElementById('radar-opacity-value'),
+    measureDistanceEnabled: document.getElementById('measure-distance-enabled'),
+    measureDistanceUndo: document.getElementById('measure-distance-undo'),
+    measureDistanceClear: document.getElementById('measure-distance-clear'),
+    anchorPointEnabled: document.getElementById('anchor-point-enabled'),
+    anchorListOpen: document.getElementById('anchor-list-open'),
+    anchorClear: document.getElementById('anchor-clear'),
+    anchorSize: document.getElementById('anchor-size'),
+    anchorAltitude: document.getElementById('anchor-altitude'),
+    anchorSymbol: document.getElementById('anchor-symbol'),
+    anchorModal: document.getElementById('anchor-modal'),
+    anchorModalClose: document.getElementById('anchor-modal-close'),
+    anchorModalCloseSecondary: document.getElementById('anchor-modal-close-secondary'),
+    anchorModalClear: document.getElementById('anchor-modal-clear'),
+    anchorExportTxt: document.getElementById('anchor-export-txt'),
+    anchorTableBody: document.getElementById('anchor-table-body'),
+    areaBoundaryEnabled: document.getElementById('area-boundary-enabled'),
+    boundaryLeft: document.getElementById('boundary-left'),
+    boundaryRight: document.getElementById('boundary-right'),
+    boundaryTop: document.getElementById('boundary-top'),
+    boundaryBottom: document.getElementById('boundary-bottom'),
     mapPanel: document.querySelector('.panel-map'),
     scdpBinsChart: document.getElementById('scdp-bins-chart'),
     icfpBinsChart: document.getElementById('icfp-bins-chart'),
@@ -202,6 +240,15 @@ map.getPane('trackPane').style.pointerEvents = 'auto';
 map.createPane('importantPathPane');
 map.getPane('importantPathPane').style.zIndex = 420;
 map.getPane('importantPathPane').style.pointerEvents = 'none';
+map.createPane('areaBoundaryPane');
+map.getPane('areaBoundaryPane').style.zIndex = 650;
+map.getPane('areaBoundaryPane').style.pointerEvents = 'none';
+map.createPane('measurePane');
+map.getPane('measurePane').style.zIndex = 700;
+map.getPane('measurePane').style.pointerEvents = 'none';
+map.createPane('anchorPane');
+map.getPane('anchorPane').style.zIndex = 710;
+map.getPane('anchorPane').style.pointerEvents = 'none';
 let baseTileLayer = null;
 let himawariLayer = null;
 let rainRadarLayer = null;
@@ -591,6 +638,10 @@ const selectedTrackMarker = L.circleMarker([0, 0], {
 const trackPointLayer = L.layerGroup().addTo(map);
 const importantPointLayer = L.layerGroup().addTo(map);
 const importantPathLayer = L.layerGroup().addTo(map);
+const areaBoundaryLayer = L.layerGroup().addTo(map);
+const measureLayer = L.layerGroup().addTo(map);
+const measurePreviewLayer = L.layerGroup().addTo(map);
+const anchorLayer = L.layerGroup().addTo(map);
 const importantOverlayStatus = L.control({ position: 'topright' });
 importantOverlayStatus.onAdd = () => {
     const div = L.DomUtil.create('div', 'important-overlay-status');
@@ -606,6 +657,30 @@ flightInfoControl.onAdd = () => {
     return div;
 };
 flightInfoControl.addTo(map);
+
+const measureInfoControl = L.control({ position: 'topright' });
+measureInfoControl.onAdd = () => {
+    const div = L.DomUtil.create('div', 'measure-info-status');
+    div.textContent = 'measure off';
+    return div;
+};
+measureInfoControl.addTo(map);
+
+const anchorInfoControl = L.control({ position: 'topright' });
+anchorInfoControl.onAdd = () => {
+    const div = L.DomUtil.create('div', 'anchor-info-status');
+    div.textContent = 'anchors 0';
+    return div;
+};
+anchorInfoControl.addTo(map);
+
+const areaBoundaryControl = L.control({ position: 'topright' });
+areaBoundaryControl.onAdd = () => {
+    const div = L.DomUtil.create('div', 'area-boundary-status');
+    div.textContent = '区域限定 off';
+    return div;
+};
+areaBoundaryControl.addTo(map);
 
 function escapeHtml(value) {
     return String(value)
@@ -933,6 +1008,650 @@ function formatMetric(value, digits = 0, suffix = '') {
         return '--';
     }
     return `${number.toFixed(digits)}${suffix}`;
+}
+
+function formatDistance(meters) {
+    const value = Number(meters);
+    if (!Number.isFinite(value) || value <= 0) {
+        return '0 m';
+    }
+    if (value < 1000) {
+        return `${value.toFixed(0)} m`;
+    }
+    return `${(value / 1000).toFixed(2)} km`;
+}
+
+function updateMeasureStatus() {
+    const node = document.querySelector('.measure-info-status');
+    if (!node) {
+        return;
+    }
+    if (!state.measureDistanceEnabled) {
+        node.textContent = state.measurePoints.length
+            ? `measure saved ${formatDistance(state.measureTotalMeters)}`
+            : 'measure off';
+        return;
+    }
+    const pointText = state.measurePoints.length === 1 ? '1 point' : `${state.measurePoints.length} points`;
+    node.textContent = `measure on | ${pointText} | ${formatDistance(state.measureTotalMeters)}`;
+}
+
+function clearMeasurePreview() {
+    measurePreviewLayer.clearLayers();
+}
+
+function drawMeasurePreview(latlng) {
+    clearMeasurePreview();
+    if (!state.measureDistanceEnabled || !state.measurePoints.length || !latlng) {
+        return;
+    }
+
+    const previous = state.measurePoints[state.measurePoints.length - 1];
+    const previewPoint = L.latLng(latlng.lat, latlng.lng);
+    const previewTotal = state.measureTotalMeters + map.distance(previous, previewPoint);
+    L.polyline([previous, previewPoint], {
+        color: '#f4b84a',
+        weight: 2,
+        opacity: 0.72,
+        dashArray: '4 7',
+        lineCap: 'round',
+        lineJoin: 'round',
+        pane: 'measurePane',
+        interactive: false,
+    }).addTo(measurePreviewLayer);
+    L.circleMarker(previewPoint, {
+        radius: 4,
+        color: '#f4b84a',
+        fillColor: '#ffffff',
+        fillOpacity: 0.85,
+        weight: 2,
+        pane: 'measurePane',
+        interactive: false,
+    }).addTo(measurePreviewLayer);
+    L.marker(previewPoint, {
+        icon: L.divIcon({
+            className: 'measure-distance-label measure-distance-preview-label',
+            html: `<span>${formatDistance(previewTotal)}</span>`,
+            iconAnchor: [0, -12],
+        }),
+        keyboard: false,
+        interactive: false,
+        pane: 'measurePane',
+    }).addTo(measurePreviewLayer);
+}
+
+function updateMeasurePreviewFromClientPoint(clientX, clientY) {
+    if (!state.measureDistanceEnabled || !state.measurePoints.length) {
+        return;
+    }
+    const container = map.getContainer();
+    const rect = container.getBoundingClientRect();
+    if (!rect.width || !rect.height) {
+        clearMeasurePreview();
+        return;
+    }
+    const clampedX = Math.min(Math.max(clientX, rect.left), rect.right);
+    const clampedY = Math.min(Math.max(clientY, rect.top), rect.bottom);
+    const point = L.point(clampedX - rect.left, clampedY - rect.top);
+    drawMeasurePreview(map.containerPointToLatLng(point));
+}
+
+function setMeasureDistanceEnabled(enabled) {
+    state.measureDistanceEnabled = Boolean(enabled);
+    if (state.measureDistanceEnabled) {
+        setAnchorPointEnabled(false);
+    } else {
+        clearMeasurePreview();
+    }
+    if (elements.measureDistanceEnabled) {
+        elements.measureDistanceEnabled.checked = state.measureDistanceEnabled;
+    }
+    map.getContainer().classList.toggle('measuring-distance', state.measureDistanceEnabled);
+    updateMeasureStatus();
+}
+
+function clearMeasureDistance() {
+    state.measurePoints = [];
+    state.measureTotalMeters = 0;
+    measureLayer.clearLayers();
+    clearMeasurePreview();
+    updateMeasureStatus();
+}
+
+function recalculateMeasureDistance() {
+    state.measureTotalMeters = 0;
+    for (let index = 1; index < state.measurePoints.length; index += 1) {
+        state.measureTotalMeters += map.distance(state.measurePoints[index - 1], state.measurePoints[index]);
+    }
+}
+
+function undoMeasurePoint() {
+    if (!state.measurePoints.length) {
+        updateMeasureStatus();
+        return;
+    }
+    state.measurePoints.pop();
+    recalculateMeasureDistance();
+    drawMeasureDistance();
+    if (!state.measurePoints.length) {
+        clearMeasurePreview();
+    }
+}
+
+function drawMeasureDistance() {
+    measureLayer.clearLayers();
+    if (!state.measurePoints.length) {
+        clearMeasurePreview();
+        updateMeasureStatus();
+        return;
+    }
+
+    state.measurePoints.forEach((latlng, index) => {
+        L.circleMarker(latlng, {
+            radius: index === 0 ? 5 : 4,
+            color: '#f4b84a',
+            fillColor: index === 0 ? '#18d39e' : '#f4b84a',
+            fillOpacity: 0.95,
+            weight: 2,
+            pane: 'measurePane',
+            interactive: false,
+        }).addTo(measureLayer);
+    });
+
+    if (state.measurePoints.length >= 2) {
+        L.polyline(state.measurePoints, {
+            color: '#f4b84a',
+            weight: 3,
+            opacity: 0.95,
+            dashArray: '8 6',
+            lineCap: 'round',
+            lineJoin: 'round',
+            pane: 'measurePane',
+            interactive: false,
+        }).addTo(measureLayer);
+
+        L.marker(state.measurePoints[state.measurePoints.length - 1], {
+            icon: L.divIcon({
+                className: 'measure-distance-label',
+                html: `<span>${formatDistance(state.measureTotalMeters)}</span>`,
+                iconAnchor: [0, -12],
+            }),
+            keyboard: false,
+            interactive: false,
+            pane: 'measurePane',
+        }).addTo(measureLayer);
+    }
+    updateMeasureStatus();
+}
+
+function addMeasurePoint(latlng) {
+    const point = L.latLng(latlng.lat, latlng.lng);
+    const previous = state.measurePoints[state.measurePoints.length - 1];
+    if (previous) {
+        state.measureTotalMeters += map.distance(previous, point);
+    }
+    state.measurePoints.push(point);
+    drawMeasureDistance();
+    clearMeasurePreview();
+}
+
+function isTextEditingTarget(target) {
+    if (!target) {
+        return false;
+    }
+    if (target.isContentEditable) {
+        return true;
+    }
+    if (target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+        return true;
+    }
+    if (target.tagName !== 'INPUT') {
+        return false;
+    }
+    const type = String(target.type || 'text').toLowerCase();
+    return [
+        'text',
+        'search',
+        'url',
+        'tel',
+        'email',
+        'password',
+        'number',
+        'date',
+        'datetime-local',
+        'month',
+        'week',
+        'time',
+    ].includes(type);
+}
+
+function formatAnchorTime(value) {
+    const time = parseTime(value);
+    if (!time) {
+        return '--';
+    }
+    return time.toLocaleString('zh-CN', { hour12: false });
+}
+
+function updateAnchorStatus() {
+    const node = document.querySelector('.anchor-info-status');
+    if (!node) {
+        return;
+    }
+    const modeText = state.anchorPointEnabled ? 'on' : 'off';
+    node.textContent = `anchors ${modeText} | ${state.anchorPoints.length}`;
+}
+
+function createAnchorIcon(anchor) {
+    const size = Math.max(16, Math.min(60, Number(state.anchorSizePx) || 28));
+    return L.divIcon({
+        className: 'anchor-point-icon-wrapper',
+        html: `<span class="anchor-point-marker" style="--anchor-size:${size}px;">${escapeHtml(anchor.name)}</span>`,
+        iconSize: [size + 2, size + 2],
+        iconAnchor: [(size + 2) / 2, (size + 2) / 2],
+    });
+}
+
+function formatAnchorCoord(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(7) : '';
+}
+
+function formatAnchorAltitude(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? number.toFixed(1) : '197.0';
+}
+
+function currentAnchorAltitude() {
+    const value = elements.anchorAltitude ? Number(elements.anchorAltitude.value) : Number(state.anchorAltitudeM);
+    return Number.isFinite(value) ? value : 197.0;
+}
+
+function currentAnchorSymbol() {
+    const value = elements.anchorSymbol ? String(elements.anchorSymbol.value).trim() : String(state.anchorSymbol || '0');
+    return value || '0';
+}
+
+function renderAnchorTable() {
+    if (!elements.anchorTableBody) {
+        return;
+    }
+    elements.anchorTableBody.innerHTML = '';
+    if (!state.anchorPoints.length) {
+        const row = document.createElement('tr');
+        const cell = document.createElement('td');
+        cell.colSpan = 6;
+        cell.textContent = '暂无锚点';
+        row.appendChild(cell);
+        elements.anchorTableBody.appendChild(row);
+        return;
+    }
+
+    state.anchorPoints.forEach((anchor) => {
+        const row = document.createElement('tr');
+        [
+            String(anchor.id),
+            formatAnchorCoord(anchor.lng),
+            formatAnchorCoord(anchor.lat),
+            formatAnchorAltitude(anchor.altitudeM),
+            String(anchor.symbol),
+            formatAnchorTime(anchor.createdAt),
+        ].forEach((value) => {
+            const cell = document.createElement('td');
+            cell.textContent = value;
+            row.appendChild(cell);
+        });
+        elements.anchorTableBody.appendChild(row);
+    });
+}
+
+function drawAnchorPoints() {
+    anchorLayer.clearLayers();
+    const coords = state.anchorPoints.map((anchor) => [anchor.lat, anchor.lng]);
+    if (coords.length >= 2) {
+        L.polyline(coords, {
+            color: '#9ca3af',
+            weight: 2,
+            opacity: 0.88,
+            dashArray: '5 7',
+            lineCap: 'round',
+            lineJoin: 'round',
+            pane: 'anchorPane',
+            interactive: false,
+        }).addTo(anchorLayer);
+    }
+    state.anchorPoints.forEach((anchor) => {
+        L.marker([anchor.lat, anchor.lng], {
+            icon: createAnchorIcon(anchor),
+            keyboard: false,
+            interactive: false,
+            pane: 'anchorPane',
+        }).addTo(anchorLayer);
+    });
+    renderAnchorTable();
+    updateAnchorStatus();
+}
+
+function setAnchorPointEnabled(enabled) {
+    state.anchorPointEnabled = Boolean(enabled);
+    if (state.anchorPointEnabled) {
+        setMeasureDistanceEnabled(false);
+    }
+    if (elements.anchorPointEnabled) {
+        elements.anchorPointEnabled.checked = state.anchorPointEnabled;
+    }
+    map.getContainer().classList.toggle('placing-anchor', state.anchorPointEnabled);
+    updateAnchorStatus();
+}
+
+function addAnchorPoint(latlng) {
+    const lat = Number(latlng.lat);
+    const lng = Number(latlng.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return;
+    }
+    const id = state.nextAnchorId;
+    state.nextAnchorId += 1;
+    state.anchorPoints.push({
+        id,
+        name: String(id),
+        lat,
+        lng,
+        altitudeM: currentAnchorAltitude(),
+        symbol: currentAnchorSymbol(),
+        createdAt: new Date().toISOString(),
+    });
+    drawAnchorPoints();
+}
+
+function undoAnchorPoint() {
+    if (!state.anchorPoints.length) {
+        updateAnchorStatus();
+        return;
+    }
+    state.anchorPoints.pop();
+    state.nextAnchorId = state.anchorPoints.reduce((maxId, anchor) => Math.max(maxId, anchor.id), 0) + 1;
+    drawAnchorPoints();
+}
+
+function clearAnchorPoints() {
+    state.anchorPoints = [];
+    state.nextAnchorId = 1;
+    anchorLayer.clearLayers();
+    renderAnchorTable();
+    updateAnchorStatus();
+}
+
+function openAnchorModal() {
+    renderAnchorTable();
+    if (elements.anchorModal) {
+        elements.anchorModal.classList.remove('hidden');
+    }
+}
+
+function closeAnchorModal() {
+    if (elements.anchorModal) {
+        elements.anchorModal.classList.add('hidden');
+    }
+}
+
+function buildAnchorTxt() {
+    const lines = [];
+    state.anchorPoints.forEach((anchor) => {
+        lines.push([
+            String(anchor.id),
+            formatAnchorCoord(anchor.lng),
+            formatAnchorCoord(anchor.lat),
+            formatAnchorAltitude(anchor.altitudeM),
+            String(anchor.symbol),
+        ].join('\t'));
+    });
+    return `${lines.join('\n')}\n`;
+}
+
+function exportAnchorTxt() {
+    const blob = new Blob([buildAnchorTxt()], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `anchor_points_${timestamp}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+}
+
+function parseBoundaryCoordinate(value, kind) {
+    const raw = String(value || '').trim();
+    if (!raw) {
+        return { value: null, error: null };
+    }
+
+    const directionMatch = raw.match(/[NSEW东西南北]/i);
+    const direction = directionMatch ? directionMatch[0].toUpperCase() : '';
+    const trimmed = raw.trim();
+    const leadingSign = trimmed.startsWith('-') ? '-' : '';
+    const numericSource = `${leadingSign}${trimmed.replace(/^[+-]/, '').replace(/-/g, ' ')}`;
+    const numbers = numericSource.match(/[+-]?\d+(?:\.\d+)?/g);
+    if (!numbers || !numbers.length) {
+        return { value: null, error: '格式无法识别' };
+    }
+
+    let decimal = Number(numbers[0]);
+    if (numbers.length >= 2) {
+        const minutes = Number(numbers[1]);
+        const seconds = numbers.length >= 3 ? Number(numbers[2]) : 0;
+        if (!Number.isFinite(minutes) || !Number.isFinite(seconds) || minutes < 0 || minutes >= 60 || seconds < 0 || seconds >= 60) {
+            return { value: null, error: '分秒范围应为 0-59' };
+        }
+        const sign = decimal < 0 ? -1 : 1;
+        decimal = sign * (Math.abs(decimal) + (minutes / 60) + (seconds / 3600));
+    }
+
+    if (direction === 'S' || direction === 'W' || direction === '南' || direction === '西') {
+        decimal = -Math.abs(decimal);
+    } else if (direction === 'N' || direction === 'E' || direction === '北' || direction === '东') {
+        decimal = Math.abs(decimal);
+    }
+
+    const limit = kind === 'lat' ? 90 : 180;
+    if (!Number.isFinite(decimal) || decimal < -limit || decimal > limit) {
+        return { value: null, error: `${kind === 'lat' ? '纬度' : '经度'}范围应为 -${limit} 到 ${limit}` };
+    }
+    return { value: decimal, error: null };
+}
+
+function readAreaBoundaryInputs() {
+    const specs = [
+        ['left', elements.boundaryLeft, 'lon', '左边界'],
+        ['right', elements.boundaryRight, 'lon', '右边界'],
+        ['top', elements.boundaryTop, 'lat', '上边界'],
+        ['bottom', elements.boundaryBottom, 'lat', '下边界'],
+    ];
+    const next = { left: null, right: null, top: null, bottom: null, errors: [] };
+    specs.forEach(([key, element, kind, label]) => {
+        const parsed = parseBoundaryCoordinate(element ? element.value : '', kind);
+        next[key] = parsed.value;
+        if (parsed.error) {
+            next.errors.push(`${label}: ${parsed.error}`);
+        }
+    });
+    if (next.left != null && next.right != null && next.left > next.right) {
+        next.errors.push('左边界不能大于右边界');
+    }
+    if (next.top != null && next.bottom != null && next.bottom > next.top) {
+        next.errors.push('下边界不能大于上边界');
+    }
+    state.areaBoundary = next;
+    return next;
+}
+
+function areaBoundaryHasAnyLimit(boundary = state.areaBoundary) {
+    return ['left', 'right', 'top', 'bottom'].some((key) => boundary[key] != null);
+}
+
+function setAreaBoundaryEnabled(enabled) {
+    state.areaBoundaryEnabled = Boolean(enabled);
+    if (elements.areaBoundaryEnabled) {
+        elements.areaBoundaryEnabled.checked = state.areaBoundaryEnabled;
+    }
+    refreshAreaBoundary(getSelectedTrackEntry());
+}
+
+function addAreaBoundaryLine(points, label) {
+    const line = L.polyline(points, {
+        color: '#ff5d6c',
+        weight: 2,
+        opacity: 0.92,
+        dashArray: '7 6',
+        pane: 'areaBoundaryPane',
+        interactive: false,
+    }).addTo(areaBoundaryLayer);
+    line.bindTooltip(label, {
+        permanent: true,
+        direction: 'center',
+        className: 'area-boundary-label',
+        opacity: 0.95,
+    });
+}
+
+function drawAreaBoundary(boundary = state.areaBoundary) {
+    areaBoundaryLayer.clearLayers();
+    if (!state.areaBoundaryEnabled || boundary.errors.length || !areaBoundaryHasAnyLimit(boundary)) {
+        return;
+    }
+    const mapBounds = map.getBounds();
+    const south = mapBounds.getSouth();
+    const north = mapBounds.getNorth();
+    const west = mapBounds.getWest();
+    const east = mapBounds.getEast();
+
+    const hasRect = boundary.left != null
+        && boundary.right != null
+        && boundary.top != null
+        && boundary.bottom != null
+        && boundary.left <= boundary.right
+        && boundary.bottom <= boundary.top;
+    if (hasRect) {
+        L.rectangle([[boundary.bottom, boundary.left], [boundary.top, boundary.right]], {
+            color: '#ff5d6c',
+            weight: 2,
+            opacity: 0.95,
+            fillColor: '#ff5d6c',
+            fillOpacity: 0.04,
+            dashArray: '7 6',
+            pane: 'areaBoundaryPane',
+            interactive: false,
+        }).addTo(areaBoundaryLayer);
+    }
+
+    const lineSouth = boundary.bottom != null ? boundary.bottom : south;
+    const lineNorth = boundary.top != null ? boundary.top : north;
+    const lineWest = boundary.left != null ? boundary.left : west;
+    const lineEast = boundary.right != null ? boundary.right : east;
+
+    if (boundary.left != null) {
+        addAreaBoundaryLine([[lineSouth, boundary.left], [lineNorth, boundary.left]], '左边界');
+    }
+    if (boundary.right != null) {
+        addAreaBoundaryLine([[lineSouth, boundary.right], [lineNorth, boundary.right]], '右边界');
+    }
+    if (boundary.top != null) {
+        addAreaBoundaryLine([[boundary.top, lineWest], [boundary.top, lineEast]], '上边界');
+    }
+    if (boundary.bottom != null) {
+        addAreaBoundaryLine([[boundary.bottom, lineWest], [boundary.bottom, lineEast]], '下边界');
+    }
+}
+
+function getSelectedTrackEntry() {
+    const selectedFrame = getSelectedFrame();
+    if (!selectedFrame || !selectedFrame.track || !selectedFrame.track.data) {
+        return null;
+    }
+    const lat = Number(selectedFrame.track.data.lat);
+    const lon = Number(selectedFrame.track.data.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon) || (lat === 0 && lon === 0)) {
+        return null;
+    }
+    return { frame: selectedFrame, data: selectedFrame.track.data };
+}
+
+function buildAreaBoundaryWarnings(item, boundary = state.areaBoundary) {
+    if (!item) {
+        return ['无有效航迹点'];
+    }
+    const lat = Number(item.data.lat);
+    const lon = Number(item.data.lon);
+    const violations = [];
+    const warnings = [];
+    if (boundary.left != null) {
+        if (lon < boundary.left) {
+            violations.push('越过左边界');
+        } else if (lon - boundary.left <= AREA_BOUNDARY_WARNING_DEG) {
+            warnings.push('接近左边界');
+        }
+    }
+    if (boundary.right != null) {
+        if (lon > boundary.right) {
+            violations.push('越过右边界');
+        } else if (boundary.right - lon <= AREA_BOUNDARY_WARNING_DEG) {
+            warnings.push('接近右边界');
+        }
+    }
+    if (boundary.top != null) {
+        if (lat > boundary.top) {
+            violations.push('越过上边界');
+        } else if (boundary.top - lat <= AREA_BOUNDARY_WARNING_DEG) {
+            warnings.push('接近上边界');
+        }
+    }
+    if (boundary.bottom != null) {
+        if (lat < boundary.bottom) {
+            violations.push('越过下边界');
+        } else if (lat - boundary.bottom <= AREA_BOUNDARY_WARNING_DEG) {
+            warnings.push('接近下边界');
+        }
+    }
+    return violations.length ? violations : warnings;
+}
+
+function updateAreaBoundaryStatus(item) {
+    const node = document.querySelector('.area-boundary-status');
+    if (!node) {
+        return;
+    }
+    if (!state.areaBoundaryEnabled) {
+        node.textContent = '区域限定 off';
+        node.classList.remove('area-boundary-alert');
+        return;
+    }
+    const boundary = state.areaBoundary;
+    if (boundary.errors.length) {
+        node.textContent = `区域限定输入错误: ${boundary.errors.join('；')}`;
+        node.classList.add('area-boundary-alert');
+        return;
+    }
+    if (!areaBoundaryHasAnyLimit(boundary)) {
+        node.textContent = '区域限定 on | 未设置边界';
+        node.classList.remove('area-boundary-alert');
+        return;
+    }
+    const warnings = buildAreaBoundaryWarnings(item, boundary);
+    if (warnings.length) {
+        node.textContent = `区域限定 | ${warnings.join('；')}`;
+        node.classList.add('area-boundary-alert');
+        return;
+    }
+    node.textContent = '区域限定 | 范围内';
+    node.classList.remove('area-boundary-alert');
+}
+
+function refreshAreaBoundary(item = getSelectedTrackEntry()) {
+    const boundary = readAreaBoundaryInputs();
+    drawAreaBoundary(boundary);
+    updateAreaBoundaryStatus(item);
 }
 
 function formatAltitude(data) {
@@ -1502,6 +2221,7 @@ function updateTrackMap(displayFrames) {
     if (!points.length) {
         trackLine.setLatLngs([]);
         updateFlightInfo(null);
+        refreshAreaBoundary(null);
         return;
     }
 
@@ -1517,6 +2237,7 @@ function updateTrackMap(displayFrames) {
     selectedTrackMarker.setStyle({ opacity: 1, fillOpacity: 0.85 });
     selectedTrackMarker.bindTooltip(formatTrackTooltip(activeEntry), { direction: 'top', opacity: 0.92 });
     updateFlightInfo(activeEntry);
+    refreshAreaBoundary(activeEntry);
 
     replayEntries.forEach((item) => {
         const marker = L.circleMarker([item.data.lat, item.data.lon], {
@@ -1555,6 +2276,7 @@ function updateTrackMapFast(displayFrames) {
     if (!points.length) {
         trackLine.setLatLngs([]);
         updateFlightInfo(null);
+        refreshAreaBoundary(null);
         if (state.replayLayerSignature !== '0' || state.trackRenderSignature !== '0') {
             trackPointLayer.clearLayers();
             state.replayLayerSignature = '0';
@@ -1578,6 +2300,7 @@ function updateTrackMapFast(displayFrames) {
     selectedTrackMarker.setStyle({ opacity: 1, fillOpacity: 0.85 });
     selectedTrackMarker.bindTooltip(formatTrackTooltip(activeEntry), { direction: 'top', opacity: 0.92 });
     updateFlightInfo(activeEntry);
+    refreshAreaBoundary(activeEntry);
 
     const replaySignature = buildReplayLayerSignature(replayVisualEntries);
     if (replaySignature !== state.replayLayerSignature) {
@@ -2061,6 +2784,92 @@ function bindEvents() {
             setRadarOpacity((Number(elements.radarOpacity.value) || 0) / 100);
         });
     }
+    if (elements.measureDistanceEnabled) {
+        elements.measureDistanceEnabled.addEventListener('change', () => {
+            setMeasureDistanceEnabled(elements.measureDistanceEnabled.checked);
+        });
+    }
+    if (elements.measureDistanceUndo) {
+        elements.measureDistanceUndo.addEventListener('click', () => {
+            undoMeasurePoint();
+        });
+    }
+    if (elements.measureDistanceClear) {
+        elements.measureDistanceClear.addEventListener('click', () => {
+            clearMeasureDistance();
+        });
+    }
+    if (elements.anchorPointEnabled) {
+        elements.anchorPointEnabled.addEventListener('change', () => {
+            setAnchorPointEnabled(elements.anchorPointEnabled.checked);
+        });
+    }
+    if (elements.anchorListOpen) {
+        elements.anchorListOpen.addEventListener('click', () => {
+            openAnchorModal();
+        });
+    }
+    if (elements.anchorClear) {
+        elements.anchorClear.addEventListener('click', () => {
+            clearAnchorPoints();
+        });
+    }
+    if (elements.anchorSize) {
+        elements.anchorSize.addEventListener('input', () => {
+            const value = Number(elements.anchorSize.value);
+            state.anchorSizePx = Number.isFinite(value) ? Math.max(16, Math.min(60, value)) : 28;
+            drawAnchorPoints();
+        });
+    }
+    if (elements.anchorAltitude) {
+        elements.anchorAltitude.addEventListener('input', () => {
+            state.anchorAltitudeM = currentAnchorAltitude();
+        });
+    }
+    if (elements.anchorSymbol) {
+        elements.anchorSymbol.addEventListener('input', () => {
+            state.anchorSymbol = currentAnchorSymbol();
+        });
+    }
+    if (elements.anchorModalClose) {
+        elements.anchorModalClose.addEventListener('click', closeAnchorModal);
+    }
+    if (elements.anchorModalCloseSecondary) {
+        elements.anchorModalCloseSecondary.addEventListener('click', closeAnchorModal);
+    }
+    if (elements.anchorModalClear) {
+        elements.anchorModalClear.addEventListener('click', () => {
+            clearAnchorPoints();
+        });
+    }
+    if (elements.anchorExportTxt) {
+        elements.anchorExportTxt.addEventListener('click', () => {
+            exportAnchorTxt();
+        });
+    }
+    if (elements.anchorModal) {
+        elements.anchorModal.addEventListener('click', (event) => {
+            if (event.target === elements.anchorModal) {
+                closeAnchorModal();
+            }
+        });
+    }
+    if (elements.areaBoundaryEnabled) {
+        state.areaBoundaryEnabled = elements.areaBoundaryEnabled.checked;
+        elements.areaBoundaryEnabled.addEventListener('change', () => {
+            setAreaBoundaryEnabled(elements.areaBoundaryEnabled.checked);
+        });
+    }
+    [
+        elements.boundaryLeft,
+        elements.boundaryRight,
+        elements.boundaryTop,
+        elements.boundaryBottom,
+    ].filter(Boolean).forEach((input) => {
+        input.addEventListener('input', () => {
+            refreshAreaBoundary();
+        });
+    });
 
     elements.liveModeBtn.addEventListener('click', () => {
         setMode('live');
@@ -2096,6 +2905,14 @@ function bindEvents() {
     });
 
     map.on('click', (event) => {
+        if (state.measureDistanceEnabled) {
+            addMeasurePoint(event.latlng);
+            return;
+        }
+        if (state.anchorPointEnabled) {
+            addAnchorPoint(event.latlng);
+            return;
+        }
         const nearest = findNearestReplayEntry(event.latlng);
         if (!nearest) {
             return;
@@ -2107,9 +2924,11 @@ function bindEvents() {
         state.selectedFrameTime = nearest.frame.time;
         requestRender();
     });
-
     map.on('movestart move moveend zoomstart zoom zoomend dragstart drag dragend', () => {
         pauseMapRefreshByInteraction();
+    });
+    map.on('moveend zoomend viewreset', () => {
+        refreshAreaBoundary();
     });
     map.on('zoomend viewreset', updateZoomStatus);
 
@@ -2118,8 +2937,28 @@ function bindEvents() {
         mapHeader.addEventListener('pointerdown', beginMapMiniDrag);
     }
     window.addEventListener('pointermove', updateMapMiniDrag);
+    window.addEventListener('pointermove', (event) => {
+        updateMeasurePreviewFromClientPoint(event.clientX, event.clientY);
+    });
     window.addEventListener('pointerup', endMapMiniDrag);
     window.addEventListener('pointercancel', endMapMiniDrag);
+    window.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            closeAnchorModal();
+        }
+        const isEditing = isTextEditingTarget(event.target);
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !isEditing) {
+            if (state.measureDistanceEnabled) {
+                event.preventDefault();
+                undoMeasurePoint();
+                return;
+            }
+            if (state.anchorPointEnabled) {
+                event.preventDefault();
+                undoAnchorPoint();
+            }
+        }
+    });
 
     window.addEventListener('scroll', () => {
         updateMapMiniMode();
