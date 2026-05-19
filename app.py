@@ -243,6 +243,20 @@ def load_important_points():
         name = str(item.get('name') or point_id)
         description = item.get('description')
         show_label = bool(item.get('show_label', False))
+        raw_coverage_radii = item.get('coverage_radii_km', [])
+        coverage_radii_km = []
+        if raw_coverage_radii:
+            if not isinstance(raw_coverage_radii, list):
+                payload['warnings'].append(f'point[{index}] coverage_radii_km invalid: expected array')
+            else:
+                for radius_index, radius_value in enumerate(raw_coverage_radii):
+                    radius_km = _parse_float(radius_value)
+                    if radius_km is None or radius_km <= 0:
+                        payload['warnings'].append(
+                            f'point[{index}] coverage_radii_km[{radius_index}] invalid: positive number required'
+                        )
+                        continue
+                    coverage_radii_km.append(radius_km)
 
         normalized_points.append({
             'id': point_id,
@@ -252,6 +266,7 @@ def load_important_points():
             'lon': lon,
             'description': None if description is None else str(description),
             'show_label': show_label,
+            'coverage_radii_km': coverage_radii_km,
         })
 
     payload['points'] = normalized_points

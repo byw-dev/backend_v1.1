@@ -591,6 +591,24 @@ body::before {
     pointer-events: none;
 }
 
+.important-radius-label {
+    border: none;
+    background: transparent;
+    pointer-events: none;
+}
+
+.important-radius-label span {
+    display: inline-block;
+    padding: 2px 6px;
+    border: 1px solid rgba(77, 204, 255, 0.42);
+    border-radius: 4px;
+    background: rgba(8, 16, 22, 0.88);
+    color: #e9f8ff;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
 .important-path-endpoint {
     display: inline-block;
     width: 12px;

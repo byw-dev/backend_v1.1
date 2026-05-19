@@ -16,7 +16,7 @@ const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
 const REPLAY_HEATMAP_RENDER_INTERVAL_MS = 2000;
 const MAP_MINI_VISIBLE_RATIO = 0.35;
-const FRONTEND_BUILD = '2026-05-17-area-boundary';
+const FRONTEND_BUILD = '2026-05-18-coverage-radii';
 const AREA_BOUNDARY_WARNING_DEG = 0.02;
 const PARTICLE_SERIES_LABELS = {
     number_conc: '\u6570\u6d53\u5ea6(#/cm^3)',
@@ -752,6 +752,53 @@ function createPathEndpointIcon(style, endpointType) {
     });
 }
 
+function normalizeCoverageRadii(point) {
+    const rawRadii = Array.isArray(point.coverage_radii_km) ? point.coverage_radii_km : [];
+    const radii = [];
+    rawRadii.forEach((value) => {
+        const radius = Number(value);
+        if (Number.isFinite(radius) && radius > 0) {
+            radii.push(radius);
+        } else {
+            console.warn('[important-points] invalid coverage radius skipped:', point.id || point.name, value);
+        }
+    });
+    return radii;
+}
+
+function renderCoverageRadii(point, lat, lon, style) {
+    const radii = normalizeCoverageRadii(point);
+    if (!radii.length) {
+        return 0;
+    }
+    const color = style && style.color ? style.color : '#4dccff';
+    radii.forEach((radiusKm) => {
+        L.circle([lat, lon], {
+            radius: radiusKm * 1000,
+            color,
+            weight: 1.5,
+            opacity: 0.78,
+            fillColor: color,
+            fillOpacity: 0.025,
+            dashArray: '8 6',
+            pane: 'importantPathPane',
+            interactive: false,
+        }).addTo(importantPathLayer);
+
+        const labelLat = lat + (radiusKm / 111.32);
+        L.marker([labelLat, lon], {
+            icon: L.divIcon({
+                className: 'important-radius-label',
+                html: `<span>${formatMetric(radiusKm, 0, ' km')}</span>`,
+            }),
+            keyboard: false,
+            interactive: false,
+            pane: 'fixedTooltipPane',
+        }).addTo(importantPathLayer);
+    });
+    return radii.length;
+}
+
 function pathMidpoint(coords) {
     if (!coords.length) {
         return null;
@@ -845,6 +892,7 @@ function renderImportantPoints() {
     const pathStyles = data.path_styles && typeof data.path_styles === 'object' ? data.path_styles : {};
     let renderedPointCount = 0;
     let renderedPathCount = 0;
+    let renderedRadiusCount = 0;
 
     points.forEach((point) => {
         const lat = Number(point.lat);
@@ -887,6 +935,7 @@ function renderImportantPoints() {
             `</div>`
         );
         importantPointLayer.addLayer(marker);
+        renderedRadiusCount += renderCoverageRadii(point, lat, lon, style);
         renderedPointCount += 1;
     });
 
@@ -970,7 +1019,7 @@ function renderImportantPoints() {
             importantPathLayer.addLayer(endMarker);
         }
     });
-    updateImportantOverlayStatus(renderedPointCount, renderedPathCount, warnings.length);
+    updateImportantOverlayStatus(renderedPointCount, renderedPathCount + renderedRadiusCount, warnings.length);
     fitInitialMapView([]);
 }
 
