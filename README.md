@@ -1,133 +1,103 @@
-# BY Weather Dashboard Backend v1.1
+# BY Weather Backend v1.1
 
-面向无人机观测任务的实时综合可视化后端与前端页面。系统以飞行轨迹时间为主时间轴，持续读取 Track、SCDP、ICFP、MWR 数据源，完成时间对齐后通过 HTTP API 与 WebSocket 推送给浏览器端展示。
+BY Weather Backend v1.1 是一个面向无人机气象观测与飞行态势展示的实时可视化项目。系统持续读取 Track、SCDP、ICFP、MWR 四类业务数据文件，将不同采样频率的数据按飞行时间轴对齐，缓存为统一的 `AlignedFrame`，再通过 HTTP API 与 WebSocket 推送给前端指挥界面。
 
-## v1.1 主要功能
+本项目不是单纯后端服务，而是一个可独立运行和打包的单机 B/S 应用：`launcher.py` 负责运行时目录、日志、外部配置和浏览器启动；`app.py` 负责 FastAPI 服务、后台轮询任务、静态前端、地图瓦片与气象影像元数据；`frontend/` 中的静态页面负责 Leaflet 地图、ECharts 图表、回放、测距、锚点和雷达/卫星叠加。
 
-- 实时读取无人机轨迹、SCDP、ICFP、MWR 文件数据。
-- 以轨迹时间为主轴做多源数据对齐，支持 MWR 数据短时保持补齐。
-- 通过 WebSocket 实时推送已对齐帧，通过 HTTP API 查询状态、最新帧和历史帧。
-- 前端仪表盘展示轨迹地图、粒子谱、时间序列、MWR 廓线和水汽饱和区热力图。
-- 支持实时模式与历史回放模式，历史回放可播放、暂停、拖动时间滑条，并可点击轨迹点选中时刻。
-- 地图支持本地瓦片、在线 OSM、卫星底图切换。
-- 支持 RainViewer 雷达图层与覆盖范围图层，雷达图层按最新 frame path 替换更新。
-- 支持重要点、固定航线/路径叠加，配置来自 `reference/important_points.json`。
-- 地图显示当前/选中轨迹点的飞行高度、经纬度等信息。
-- 地图窗口滚出主要视口后可切换为右下角小窗口，方便滚动查看其他图表时继续观察轨迹。
-- 页面滚动、地图拖拽/缩放时会暂缓重渲染，降低卡顿。
+## 文档入口
 
-## 目录结构
+建议按下面顺序阅读：
 
-```text
-backend_v1.1/
-  app.py                  FastAPI 入口、API、WebSocket、静态文件服务
-  config.py               数据源、轮询、地图、雷达等配置
-  readers.py              Track/SCDP/ICFP/MWR 文件读取与解析
-  aligner.py              多源数据按轨迹时间对齐
-  store.py                内存历史数据存储
-  publisher.py            WebSocket 连接管理
-  mwr_saturation.py       MWR 饱和区识别
-  simulate_realtime.py    实时数据模拟器
-  smoke_test.py           数据读取与对齐冒烟测试
-  frontend/               浏览器端页面、样式和可视化逻辑
-  simulated_data/         模拟数据输出/回退数据目录
-  reference/              重要点配置与参考算法
-  map_tiles/              本地离线瓦片目录
-```
+1. [CLAUDE.md](./CLAUDE.md)：给 AI Agent 和维护者的项目总览、边界与协作约定。
+2. [doc/design/overview.md](./doc/design/overview.md)：整体架构、模块职责和运行链路。
+3. [doc/design/data-pipeline.md](./doc/design/data-pipeline.md)：数据源、增量读取、对齐策略和状态语义。
+4. [doc/design/backend.md](./doc/design/backend.md)：FastAPI 生命周期、接口、WebSocket 和运行时路径。
+5. [doc/design/frontend.md](./doc/design/frontend.md)：前端页面结构、地图图层、图表和交互状态。
+6. [doc/design/deployment.md](./doc/design/deployment.md)：本地运行、模拟数据、日志、PyInstaller 打包和发布目录。
+7. [DECISIONS.md](./DECISIONS.md)：关键技术与业务决策记录。
 
-## 运行
+## 快速运行
 
-安装依赖后启动服务：
+开发态直接启动：
 
 ```bash
 python app.py
 ```
 
-默认地址：
+或使用启动器，获得与打包态一致的运行时目录、日志和自动开浏览器行为：
+
+```bash
+python launcher.py
+```
+
+默认访问：
 
 - 页面：`http://127.0.0.1:8000`
 - API 文档：`http://127.0.0.1:8000/docs`
 
-也可以直接使用 uvicorn：
+## 核心目录
+
+```text
+backend_v1.1/
+  launcher.py             # 单机启动器：运行时目录、日志、外部 config、浏览器
+  app.py                  # FastAPI 入口、后台轮询、HTTP API、WebSocket、静态资源
+  config.py               # 业务文件路径、轮询/对齐参数、地图/影像配置
+  models.py               # Track/SCDP/ICFP/MWR/AlignedFrame 数据模型
+  readers.py              # 四类文件的增量读取、header 解析、记录构造
+  aligner.py              # 以 Track 时间为主轴的数据对齐
+  store.py                # 内存缓存、文件游标、历史窗口
+  publisher.py            # WebSocket 连接管理与广播
+  mwr_saturation.py       # MWR 0-1 km 水汽饱和区识别
+  simulate_realtime.py    # 模拟实时数据写入器
+  smoke_test.py           # 基础冒烟测试
+  frontend/               # 静态前端：index.html, styles.css, app.js
+  reference/              # 重要点位、参考算法
+  simulated_data/         # 模拟实时数据与 bootstrap 样例
+  map_tiles/              # 离线地图瓦片与瓦片工具
+  logs/                   # launcher 运行日志
+  doc/design/             # 架构设计文档
+```
+
+## 常用命令
 
 ```bash
+# 启动完整应用
+python launcher.py
+
+# 仅启动 FastAPI
 python -m uvicorn app:app --host 127.0.0.1 --port 8000
-```
 
-## 数据源配置
-
-主要配置集中在 `config.py`：
-
-- `TRACK_FILE`：无人机轨迹文件。
-- `SCDP_FILE`：SCDP 数据文件。
-- `ICFP_FILE`：ICFP 数据文件。
-- `MWR_FILE`：MWR 数据文件。
-- `POLL_INTERVAL_SEC`：后台轮询间隔，当前为 `0.5s`。
-- `ALIGN_DELAY_SEC`：轨迹数据到达后延迟对齐时间，当前为 `2s`。
-- `MWR_HOLD_SEC`：MWR 允许保持时间，当前为 `15s`。
-- `MAX_HISTORY_SECONDS`：内存历史帧上限，当前为 `3600s`。
-- `ALLOW_SIMULATED_FALLBACK`：主数据文件缺失时是否允许回退到 `simulated_data/`。
-
-轨迹字段按固定列读取，配置在 `TRACK_COLS`。MWR 只保留 `0-1000m` 高度层，配置在 `MWR_LEVELS_M`。
-
-## 前端能力
-
-前端位于 `frontend/`，由 `index.html`、`styles.css`、`app.js` 组成。
-
-当前页面包含：
-
-- 顶部连接状态、模式、最新时刻、日期和历史窗口提示。
-- 历史窗口控制、实时/回放模式切换、回放播放/暂停、回放采样间隔和时间滑条。
-- 地图底图选择、本地/在线/卫星切换。
-- Radar 与 Coverage 图层开关、雷达透明度控制。
-- 轨迹地图、当前轨迹点、选中轨迹点、采样回放点。
-- SCDP/ICFP 滴谱柱状图和时间序列。
-- MWR 单值量时间序列、温度/湿度/水汽密度/液态水廓线。
-- MWR 水汽饱和区时间-高度热力图。
-
-## 地图与雷达
-
-地图底图配置：
-
-- 本地瓦片目录：`map_tiles/{z}/{x}/{y}.png`
-- 本地 URL：`/tiles/{z}/{x}/{y}.png`
-- 在线 OSM：`MAP_ONLINE_URL_TEMPLATE`
-- 卫星底图：`MAP_SATELLITE_URL_TEMPLATE`
-
-RainViewer 雷达配置：
-
-- 元数据 API：`RAINVIEWER_API_URL`
-- 自动检查间隔：前端 `RAINVIEWER_API_REFRESH_MS`，当前为 `10min`
-- 更新机制：请求 RainViewer 元数据，读取最新 `radar.past` 帧；若 `latestFrame.path` 变化，则移除旧雷达瓦片层并创建新的 Leaflet `tileLayer`。
-
-## API
-
-- `GET /`：返回前端页面。
-- `GET /api/status`：运行状态、各数据源计数、最新对齐时间、文件状态。
-- `GET /api/latest`：最新对齐帧。
-- `GET /api/history?seconds=300`：最近 N 秒历史对齐帧，最大不超过 `MAX_HISTORY_SECONDS`。
-- `GET /api/map-config`：前端地图、瓦片、RainViewer 配置。
-- `GET /api/important-points`：重要点与固定路径配置。
-- `WS /ws/realtime`：实时推送对齐后的帧数据。
-
-## 测试与模拟
-
-冒烟测试：
-
-```bash
+# 运行冒烟测试
 python smoke_test.py
-```
 
-实时模拟器：
-
-```bash
+# 生成/追加模拟实时数据
 python simulate_realtime.py
 ```
 
-模拟器会根据 `config.py` 中的 `SOURCE_*` 与 `SIM_*` 配置向 `simulated_data/` 输出模拟实时文件。业务模式下默认 `ALLOW_SIMULATED_FALLBACK = False`，即主数据源缺失时不会自动使用模拟数据。
+## 配置重点
 
-## 备注
+主要配置集中在 [config.py](./config.py)：
 
-- 当前存储为内存存储，服务重启后历史数据会清空。
-- WebSocket 只负责服务端向浏览器推送，客户端消息仅用于保持连接。
-- 页面中的图表渲染做了节流；回放模式下地图、图表、热力图使用不同刷新间隔以降低前端压力。
+- `TRACK_FILE`、`SCDP_FILE`、`ICFP_FILE`、`MWR_FILE`：业务数据输入文件。
+- `ALLOW_SIMULATED_FALLBACK`：主业务文件缺失时是否允许回退到 `simulated_data/`。
+- `POLL_INTERVAL_SEC`：后台轮询间隔。
+- `ALIGN_DELAY_SEC`：Track 到达后等待其它源数据的对齐延迟。
+- `MWR_HOLD_SEC`：MWR 最近有效廓线的保持窗口。
+- `ICFP_LOOKBACK_SEC`：ICFP 向前查找窗口。
+- `MAX_HISTORY_SECONDS`：内存历史窗口。
+- `HOST`、`PORT`、`AUTO_OPEN_BROWSER`：运行地址与启动行为。
+
+## API 摘要
+
+- `GET /`：返回前端页面。
+- `GET /api/status`：返回缓存数量、最新时间、文件状态和运行参数。
+- `GET /api/latest`：返回最新对齐帧。
+- `GET /api/history?seconds=300`：返回最近窗口内的对齐帧列表。
+- `GET /api/map-config`：返回地图瓦片、RainViewer、Himawari 配置。
+- `GET /api/himawari/latest`：返回最新 Himawari 图层元数据。
+- `GET /api/important-points`：返回重要点位和路径。
+- `WS /ws/realtime`：实时推送 `AlignedFrame`。
+
+## 打包说明
+
+当前 PyInstaller 入口为 [TEST_BYW.spec](./TEST_BYW.spec)，目标入口是 [launcher.py](./launcher.py)。打包产物位于 `dist/TEST_BYW/`，运行时会优先从可执行文件所在目录读取 `config.py`、`frontend/`、`map_tiles/`、`reference/`、`simulated_data/` 等资源。
