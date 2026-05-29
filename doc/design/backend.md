@@ -106,7 +106,22 @@ manager = ConnectionManager()
 - 本地/在线/卫星底图 URL 模板。
 - Leaflet zoom 范围。
 - RainViewer 参数。
+- 本地云雷达目录可用性、PPI/RPI 产品列表、刷新间隔、默认透明度、最大探测半径和雷达站经纬度。
 - Himawari 产品列表与刷新间隔。
+
+### GET `/api/local-radar/latest?product=PPI`
+
+读取本地云雷达最新一帧数据，`product` 支持 `PPI`、`RPI`，默认使用 `LOCAL_RADAR_DEFAULT_PRODUCT`。
+
+运行机制：
+
+- 数据目录来自 `LOCAL_RADAR_BASE_DIR`，当前约定为 `LOCAL_RADAR_BASE_DIR / PPICMA` 和 `LOCAL_RADAR_BASE_DIR / RPICMA`。
+- 后端扫描对应目录下的 `.zip` 文件，按文件名时间解析并选择最新文件。
+- 使用 `local_radar.py` 读取 CMA/Z_RADA 径向基数据，默认提取 `LOCAL_RADAR_VARIABLE`，通常为 `Z2`。
+- 返回雷达站经纬度、扫描时间、方位角、距离、反射率矩阵、统计量和绘制参数。
+- 接口结果按 `LOCAL_RADAR_REFRESH_SECONDS` 做内存缓存，当前默认 20 秒；传入 `force=true` 时跳过缓存重新扫描/读取。
+
+返回数据是极坐标绘制数据，不是瓦片，也不是历史序列。前端负责按地图投影绘制 Canvas 图层。
 
 ### GET `/api/himawari/latest`
 
@@ -133,6 +148,10 @@ manager = ConnectionManager()
 - `points`
 - `paths`
 - `coverage_radii_km`
+- `coverage_color`
+- `azimuth_sector_count`
+- `azimuth_radius_km`
+- `azimuth_start_deg`
 
 ## WebSocket
 

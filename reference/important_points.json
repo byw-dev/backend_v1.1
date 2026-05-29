@@ -43,11 +43,15 @@
       "id": "point-1",
       "name": "雷州云雷达",
       "type": "station",
-      "lat": 20.9619,
-      "lon": 110.0678,
+      "lat": 20.96194444,
+      "lon": 110.06777778,
       "description": "Replace this point name/coordinate with your real fixed point.",
       "show_label": true,
-      "coverage_radii_km": [10, 20, 30, 40]
+      "coverage_radii_km": [10, 20, 30, 40],
+      "coverage_color": "#000000",
+      "azimuth_sector_count": 12,
+      "azimuth_radius_km": 40,
+      "azimuth_start_deg": 0
     }
   ],
   "paths": [

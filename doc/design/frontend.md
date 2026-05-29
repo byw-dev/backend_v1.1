@@ -59,6 +59,8 @@ DOM 引用集中在 `dom` 对象，图表实例集中在 `charts` 对象。
 前端启动时主要调用：
 
 - `/api/map-config`
+- `/api/local-radar/latest?product=PPI`
+- `/api/local-radar/latest?product=RPI`
 - `/api/history`
 - `/api/latest`
 - `/api/important-points`
@@ -79,13 +81,24 @@ Leaflet 地图包含：
 | 在线卫星底图 | `MAP_SATELLITE_URL_TEMPLATE` |
 | RainViewer 雷达 | 前端根据 `/api/map-config` 获取参数后加载 |
 | RainViewer coverage | 雷达覆盖范围辅助层 |
+| 本地云雷达 PPI/RPI | `/api/local-radar/latest` 返回的极坐标径向数据，Canvas 叠加，PPI 在下层，RPI 在上层 |
 | Himawari | `/api/himawari/latest` 返回的 JMA tile 模板 |
 | 重要点位/路径 | `/api/important-points` |
+| 雷达探测范围 | 点位 `coverage_radii_km` 渲染同心圆，`azimuth_sector_count` 渲染方位角径向线，`coverage_color` 控制覆盖层颜色。 |
 | 测距线 | 用户点击生成 |
 | 锚点 | 用户点击生成 |
 | 区域边界 | 用户输入经纬度边界生成 |
 
-`app.js` 为 RainViewer、Himawari、重要路径等建立了独立 pane，便于控制层级和点击穿透。
+`app.js` 为 RainViewer、本地云雷达、Himawari、重要路径等建立了独立 pane，便于控制层级和点击穿透。本地云雷达 pane 的层级高于 RainViewer；PPI 与 RPI 同时开启时，前端分别请求最新数据并以 Canvas 绘制，绘制顺序固定为 PPI 先画、RPI 后画。
+
+本地云雷达刷新机制：
+
+- 页面加载 `/api/map-config` 后获得 `local_radar_refresh_seconds`，默认 20 秒。
+- 总开关关闭时移除本地云雷达图层，不发起读取。
+- 总开关开启后，按已勾选产品分别请求 `/api/local-radar/latest?product=PPI`、`/api/local-radar/latest?product=RPI`。
+- 定时刷新时，如果距离上次刷新不足配置间隔且已有图层，则跳过本轮请求。
+- 切换总开关、PPI/RPI 开关时会强制刷新一次。
+- 地图左下角状态显示当前读取到的产品和扫描时间，时间格式为 `HH:mm`。
 
 ## 图表
 

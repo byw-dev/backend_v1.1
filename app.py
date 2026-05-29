@@ -5,6 +5,7 @@ import time
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 import requests
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -37,6 +38,19 @@ from config import (
     RAINVIEWER_SMOOTH,
     RAINVIEWER_SNOW,
     RAINVIEWER_TILE_SIZE,
+    LOCAL_RADAR_AZIMUTH_STEP_DEG,
+    LOCAL_RADAR_BASE_DIR,
+    LOCAL_RADAR_DEFAULT_OPACITY,
+    LOCAL_RADAR_DEFAULT_PRODUCT,
+    LOCAL_RADAR_GATE_RESOLUTION_KM,
+    LOCAL_RADAR_LAT,
+    LOCAL_RADAR_LON,
+    LOCAL_RADAR_MAX_RANGE_KM,
+    LOCAL_RADAR_PRODUCTS,
+    LOCAL_RADAR_RANGE_BIN_KM,
+    LOCAL_RADAR_REFRESH_SECONDS,
+    LOCAL_RADAR_SITE_NAME,
+    LOCAL_RADAR_VARIABLE,
     IMPORTANT_POINTS_FILE,
     ICFP_LOOKBACK_SEC,
     MAX_HISTORY_SECONDS,
@@ -44,6 +58,7 @@ from config import (
     POLL_INTERVAL_SEC,
     PORT,
 )
+from local_radar import build_local_radar_payload
 from publisher import ConnectionManager
 from readers import poll_all_sources
 from store import InMemoryStore
@@ -77,8 +92,14 @@ def _runtime_path(path: Path) -> Path:
 
 frontend_dir = _runtime_base_dir() / 'frontend'
 tiles_dir = _runtime_path(MAP_TILES_DIR)
+local_radar_base_dir = _runtime_path(LOCAL_RADAR_BASE_DIR)
 himawari_cache = {
     'loaded_at': 0.0,
+    'payload': None,
+}
+local_radar_cache = {
+    'loaded_at': 0.0,
+    'product': None,
     'payload': None,
 }
 
@@ -142,6 +163,39 @@ def _load_himawari_metadata():
     }
     himawari_cache['loaded_at'] = now
     himawari_cache['payload'] = payload
+    return payload
+
+
+def _load_local_radar_metadata(product=None, force=False):
+    selected = (product or LOCAL_RADAR_DEFAULT_PRODUCT or 'PPI').upper()
+    if selected not in {item.upper() for item in LOCAL_RADAR_PRODUCTS}:
+        selected = (LOCAL_RADAR_DEFAULT_PRODUCT or LOCAL_RADAR_PRODUCTS[0]).upper()
+    now = time.time()
+    cached = local_radar_cache.get('payload')
+    if (
+        not force
+        and cached
+        and local_radar_cache.get('product') == selected
+        and now - local_radar_cache.get('loaded_at', 0.0) < LOCAL_RADAR_REFRESH_SECONDS
+    ):
+        return cached
+
+    payload = build_local_radar_payload(
+        local_radar_base_dir,
+        products=[selected],
+        variable=LOCAL_RADAR_VARIABLE,
+        max_range_km=LOCAL_RADAR_MAX_RANGE_KM,
+        gate_resolution_km=LOCAL_RADAR_GATE_RESOLUTION_KM,
+        range_bin_km=LOCAL_RADAR_RANGE_BIN_KM,
+        azimuth_step_deg=LOCAL_RADAR_AZIMUTH_STEP_DEG,
+        radar_lat=LOCAL_RADAR_LAT,
+        radar_lon=LOCAL_RADAR_LON,
+    )
+    if payload.get('available') and LOCAL_RADAR_SITE_NAME:
+        payload.setdefault('radar', {})['site_name'] = LOCAL_RADAR_SITE_NAME
+    local_radar_cache['loaded_at'] = now
+    local_radar_cache['product'] = selected
+    local_radar_cache['payload'] = payload
     return payload
 
 
@@ -258,6 +312,38 @@ def load_important_points():
                         continue
                     coverage_radii_km.append(radius_km)
 
+        coverage_color = None
+        if item.get('coverage_color') is not None:
+            raw_coverage_color = str(item.get('coverage_color')).strip()
+            if raw_coverage_color:
+                coverage_color = raw_coverage_color
+
+        azimuth_sector_count = None
+        if item.get('azimuth_sector_count') is not None:
+            try:
+                candidate = int(item.get('azimuth_sector_count'))
+            except (TypeError, ValueError):
+                candidate = 0
+            if 1 <= candidate <= 72:
+                azimuth_sector_count = candidate
+            else:
+                payload['warnings'].append(
+                    f'point[{index}] azimuth_sector_count invalid: expected integer in [1, 72]'
+                )
+
+        azimuth_radius_km = None
+        if item.get('azimuth_radius_km') is not None:
+            azimuth_radius_km = _parse_float(item.get('azimuth_radius_km'))
+            if azimuth_radius_km is None or azimuth_radius_km <= 0:
+                payload['warnings'].append(
+                    f'point[{index}] azimuth_radius_km invalid: positive number required'
+                )
+                azimuth_radius_km = None
+
+        azimuth_start_deg = _parse_float(item.get('azimuth_start_deg'))
+        if azimuth_start_deg is None:
+            azimuth_start_deg = 0.0
+
         normalized_points.append({
             'id': point_id,
             'name': name,
@@ -267,6 +353,10 @@ def load_important_points():
             'description': None if description is None else str(description),
             'show_label': show_label,
             'coverage_radii_km': coverage_radii_km,
+            'coverage_color': coverage_color,
+            'azimuth_sector_count': azimuth_sector_count,
+            'azimuth_radius_km': azimuth_radius_km,
+            'azimuth_start_deg': azimuth_start_deg,
         })
 
     payload['points'] = normalized_points
@@ -451,6 +541,18 @@ def map_config():
         'rainviewer_color_scheme': RAINVIEWER_COLOR_SCHEME,
         'rainviewer_smooth': RAINVIEWER_SMOOTH,
         'rainviewer_snow': RAINVIEWER_SNOW,
+        'local_radar_available': local_radar_base_dir.exists(),
+        'local_radar_products': LOCAL_RADAR_PRODUCTS,
+        'local_radar_default_product': LOCAL_RADAR_DEFAULT_PRODUCT,
+        'local_radar_variable': LOCAL_RADAR_VARIABLE,
+        'local_radar_refresh_seconds': LOCAL_RADAR_REFRESH_SECONDS,
+        'local_radar_default_opacity': LOCAL_RADAR_DEFAULT_OPACITY,
+        'local_radar_max_range_km': LOCAL_RADAR_MAX_RANGE_KM,
+        'local_radar_site': {
+            'lat': LOCAL_RADAR_LAT,
+            'lon': LOCAL_RADAR_LON,
+            'name': LOCAL_RADAR_SITE_NAME,
+        },
         'himawari_products': HIMAWARI_PRODUCTS,
         'himawari_preferred_image_formats': HIMAWARI_PREFERRED_IMAGE_FORMATS,
         'himawari_refresh_seconds': HIMAWARI_REFRESH_SECONDS,
@@ -468,6 +570,19 @@ def himawari_latest():
             'error': str(exc),
             'products': HIMAWARI_PRODUCTS,
             'image_format': 'jpg',
+        }
+
+
+@app.get('/api/local-radar/latest')
+def local_radar_latest(product: Optional[str] = None, force: bool = False):
+    try:
+        return _load_local_radar_metadata(product=product, force=force)
+    except Exception as exc:
+        return {
+            'available': False,
+            'error': str(exc),
+            'base_dir': str(local_radar_base_dir),
+            'products': LOCAL_RADAR_PRODUCTS,
         }
 
 

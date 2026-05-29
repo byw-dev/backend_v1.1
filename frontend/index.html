@@ -10,7 +10,7 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin=""
     >
-    <link rel="stylesheet" href="/static/styles.css?v=20260430-command-ui">
+    <link rel="stylesheet" href="/static/styles.css?v=20260529-local-radar-20s">
 </head>
 <body>
     <header class="topbar">
@@ -85,11 +85,28 @@
                 </label>
                 <label class="toggle">
                     <input id="radar-overlay-enabled" type="checkbox" checked>
-                    <span>叠加雷达</span>
+                    <span>叠加全球雷达</span>
                 </label>
                 <label class="toggle">
                     <input id="radar-coverage-enabled" type="checkbox">
                     <span>雷达覆盖</span>
+                </label>
+                <label class="toggle">
+                    <input id="local-radar-enabled" type="checkbox">
+                    <span>叠加本地云雷达</span>
+                </label>
+                <label class="toggle">
+                    <input id="local-radar-ppi-enabled" type="checkbox" checked>
+                    <span>PPI</span>
+                </label>
+                <label class="toggle">
+                    <input id="local-radar-rpi-enabled" type="checkbox" checked>
+                    <span>RPI</span>
+                </label>
+                <label class="radar-opacity-wrap">
+                    <span>云雷达透明度</span>
+                    <input id="local-radar-opacity" type="range" min="0" max="100" value="72">
+                    <span id="local-radar-opacity-value">72%</span>
                 </label>
                 <label class="radar-opacity-wrap">
                     <span>雷达透明度</span>
@@ -307,6 +324,6 @@
         crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
-    <script src="/static/app.js?v=20260518-coverage-radii"></script>
+    <script src="/static/app.js?v=20260529-local-radar-20s"></script>
 </body>
 </html>

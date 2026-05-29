@@ -11,13 +11,30 @@ const MAP_INTERACTION_IDLE_RESUME_MS = 2000;
 const MAP_MINI_VIEWPORT_MARGIN = 16;
 const RAINVIEWER_API_REFRESH_MS = 10 * 60 * 1000;
 const HIMAWARI_API_REFRESH_MS = 10 * 60 * 1000;
+const LOCAL_RADAR_API_REFRESH_MS = 20 * 1000;
 const LEAFLET_TILE_SIZE = 256;
 const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
 const REPLAY_HEATMAP_RENDER_INTERVAL_MS = 2000;
 const MAP_MINI_VISIBLE_RATIO = 0.35;
-const FRONTEND_BUILD = '2026-05-18-coverage-radii';
+const FRONTEND_BUILD = '2026-05-29-local-radar-20s';
 const AREA_BOUNDARY_WARNING_DEG = 0.02;
+const EARTH_RADIUS_KM = 6371.0088;
+const MAX_AZIMUTH_SECTOR_COUNT = 72;
+const LOCAL_RADAR_COLOR_STOPS = [
+    [-30, '#e5e7eb'],
+    [-20, '#9ca3af'],
+    [-10, '#38bdf8'],
+    [0, '#2563eb'],
+    [5, '#22c55e'],
+    [10, '#84cc16'],
+    [15, '#facc15'],
+    [20, '#f97316'],
+    [25, '#ef4444'],
+    [30, '#b91c1c'],
+    [35, '#a855f7'],
+    [40, '#f0abfc'],
+];
 const PARTICLE_SERIES_LABELS = {
     number_conc: '\u6570\u6d53\u5ea6(#/cm^3)',
     lwc: '\u6db2\u6001\u6c34\u542b\u91cf(g/m^3)',
@@ -50,6 +67,14 @@ const DEFAULT_MAP_CONFIG = {
     rainviewer_color_scheme: 2,
     rainviewer_smooth: 1,
     rainviewer_snow: 1,
+    local_radar_available: false,
+    local_radar_products: ['PPI', 'RPI'],
+    local_radar_default_product: 'PPI',
+    local_radar_variable: 'Z2',
+    local_radar_refresh_seconds: 20,
+    local_radar_default_opacity: 0.72,
+    local_radar_max_range_km: 50,
+    local_radar_site: { lat: 20.96194444, lon: 110.06777778, name: '雷州云雷达' },
     himawari_products: [
         { id: 'infrared_b13', label: 'Himawari 红外 B13', band: 'B13', product: 'TBB', opacity: 0.72 },
         { id: 'visible_b03', label: 'Himawari 可见光 B03', band: 'B03', product: 'ALBD', opacity: 0.68 },
@@ -102,6 +127,15 @@ const state = {
     radarLastApiFetchAt: 0,
     radarFramePath: '',
     radarStatus: 'radar --',
+    localRadarEnabled: false,
+    localRadarProductsEnabled: {
+        PPI: true,
+        RPI: true,
+    },
+    localRadarOpacity: DEFAULT_MAP_CONFIG.local_radar_default_opacity,
+    localRadarLastApiFetchAt: 0,
+    localRadarSignatures: {},
+    localRadarStatus: 'local radar off',
     himawariEnabled: false,
     himawariProductId: 'infrared_b13',
     himawariLastApiFetchAt: 0,
@@ -169,6 +203,11 @@ const elements = {
     radarCoverageEnabled: document.getElementById('radar-coverage-enabled'),
     radarOpacity: document.getElementById('radar-opacity'),
     radarOpacityValue: document.getElementById('radar-opacity-value'),
+    localRadarEnabled: document.getElementById('local-radar-enabled'),
+    localRadarPpiEnabled: document.getElementById('local-radar-ppi-enabled'),
+    localRadarRpiEnabled: document.getElementById('local-radar-rpi-enabled'),
+    localRadarOpacity: document.getElementById('local-radar-opacity'),
+    localRadarOpacityValue: document.getElementById('local-radar-opacity-value'),
     measureDistanceEnabled: document.getElementById('measure-distance-enabled'),
     measureDistanceUndo: document.getElementById('measure-distance-undo'),
     measureDistanceClear: document.getElementById('measure-distance-clear'),
@@ -228,6 +267,9 @@ map.getPane('fixedTooltipPane').style.pointerEvents = 'none';
 map.createPane('rainRadarPane');
 map.getPane('rainRadarPane').style.zIndex = 500;
 map.getPane('rainRadarPane').style.pointerEvents = 'none';
+map.createPane('localRadarPane');
+map.getPane('localRadarPane').style.zIndex = 510;
+map.getPane('localRadarPane').style.pointerEvents = 'none';
 map.createPane('rainCoveragePane');
 map.getPane('rainCoveragePane').style.zIndex = 490;
 map.getPane('rainCoveragePane').style.pointerEvents = 'none';
@@ -253,6 +295,7 @@ let baseTileLayer = null;
 let himawariLayer = null;
 let rainRadarLayer = null;
 let rainRadarCoverageLayer = null;
+const localRadarLayers = {};
 const rainRadarStatus = L.control({ position: 'bottomleft' });
 rainRadarStatus.onAdd = () => {
     const div = L.DomUtil.create('div', 'rain-radar-status');
@@ -260,6 +303,26 @@ rainRadarStatus.onAdd = () => {
     return div;
 };
 rainRadarStatus.addTo(map);
+const localRadarStatus = L.control({ position: 'bottomleft' });
+localRadarStatus.onAdd = () => {
+    const div = L.DomUtil.create('div', 'local-radar-status');
+    div.textContent = state.localRadarStatus;
+    return div;
+};
+localRadarStatus.addTo(map);
+const localRadarLegend = L.control({ position: 'bottomright' });
+localRadarLegend.onAdd = () => {
+    const div = L.DomUtil.create('div', 'local-radar-legend hidden');
+    const rows = [...LOCAL_RADAR_COLOR_STOPS].reverse().map(([value, color]) => (
+        `<div class="local-radar-legend-row">`
+        + `<span class="local-radar-legend-swatch" style="background:${color};"></span>`
+        + `<span>${value}</span>`
+        + `</div>`
+    )).join('');
+    div.innerHTML = `<div class="local-radar-legend-title">dBZ</div>${rows}`;
+    return div;
+};
+localRadarLegend.addTo(map);
 const himawariStatus = L.control({ position: 'bottomleft' });
 himawariStatus.onAdd = () => {
     const div = L.DomUtil.create('div', 'himawari-status');
@@ -318,6 +381,21 @@ function updateRadarStatus(text) {
     }
 }
 
+function updateLocalRadarStatus(text) {
+    state.localRadarStatus = text;
+    const node = document.querySelector('.local-radar-status');
+    if (node) {
+        node.textContent = text;
+    }
+}
+
+function updateLocalRadarLegendVisibility() {
+    const node = document.querySelector('.local-radar-legend');
+    if (node) {
+        node.classList.toggle('hidden', !state.localRadarEnabled || !Object.keys(localRadarLayers).length);
+    }
+}
+
 function updateHimawariStatus(text) {
     state.himawariStatus = text;
     const node = document.querySelector('.himawari-status');
@@ -362,6 +440,24 @@ function populateHimawariProducts() {
     }
     elements.himawariProduct.value = state.himawariProductId;
     elements.himawariProduct.disabled = !products.length;
+}
+
+function getLocalRadarProducts() {
+    const cfg = state.mapConfig || DEFAULT_MAP_CONFIG;
+    return Array.isArray(cfg.local_radar_products) && cfg.local_radar_products.length
+        ? cfg.local_radar_products
+        : DEFAULT_MAP_CONFIG.local_radar_products;
+}
+
+function populateLocalRadarProducts() {
+    const products = getLocalRadarProducts();
+    const productSet = new Set(products.map((item) => String(item).toUpperCase()));
+    if (elements.localRadarPpiEnabled) {
+        elements.localRadarPpiEnabled.disabled = !state.mapConfig.local_radar_available || !productSet.has('PPI');
+    }
+    if (elements.localRadarRpiEnabled) {
+        elements.localRadarRpiEnabled.disabled = !state.mapConfig.local_radar_available || !productSet.has('RPI');
+    }
 }
 
 function removeHimawariLayer(statusText = 'himawari off') {
@@ -499,6 +595,17 @@ function setRadarOpacity(opacity) {
     }
     if (elements.radarOpacityValue) {
         elements.radarOpacityValue.textContent = `${Math.round(state.radarOpacity * 100)}%`;
+    }
+}
+
+function setLocalRadarOpacity(opacity) {
+    state.localRadarOpacity = Math.max(0, Math.min(1, Number(opacity) || 0));
+    Object.values(localRadarLayers).forEach((layer) => layer.setOpacity(state.localRadarOpacity));
+    if (elements.localRadarOpacity) {
+        elements.localRadarOpacity.value = String(Math.round(state.localRadarOpacity * 100));
+    }
+    if (elements.localRadarOpacityValue) {
+        elements.localRadarOpacityValue.textContent = `${Math.round(state.localRadarOpacity * 100)}%`;
     }
 }
 
@@ -766,12 +873,94 @@ function normalizeCoverageRadii(point) {
     return radii;
 }
 
-function renderCoverageRadii(point, lat, lon, style) {
-    const radii = normalizeCoverageRadii(point);
-    if (!radii.length) {
+function getCoverageOverlayColor(point, style) {
+    if (point && typeof point.coverage_color === 'string' && point.coverage_color.trim()) {
+        return point.coverage_color;
+    }
+    return style && style.color ? style.color : '#4dccff';
+}
+
+function normalizeAzimuthOverlay(point, radii) {
+    const rawCount = Number(point.azimuth_sector_count);
+    if (!Number.isFinite(rawCount) || rawCount <= 0) {
+        return null;
+    }
+    const count = Math.floor(rawCount);
+    if (count < 1 || count > MAX_AZIMUTH_SECTOR_COUNT) {
+        console.warn('[important-points] invalid azimuth sector count skipped:', point.id || point.name, rawCount);
+        return null;
+    }
+    const rawRadius = Number(point.azimuth_radius_km);
+    const fallbackRadius = radii.length ? Math.max(...radii) : 0;
+    const radiusKm = Number.isFinite(rawRadius) && rawRadius > 0 ? rawRadius : fallbackRadius;
+    if (!Number.isFinite(radiusKm) || radiusKm <= 0) {
+        console.warn('[important-points] azimuth overlay requires positive radius:', point.id || point.name);
+        return null;
+    }
+    const startDeg = Number(point.azimuth_start_deg);
+    return {
+        count,
+        radiusKm,
+        startDeg: Number.isFinite(startDeg) ? startDeg : 0,
+    };
+}
+
+function destinationPoint(lat, lon, bearingDeg, distanceKm) {
+    const angularDistance = distanceKm / EARTH_RADIUS_KM;
+    const bearing = bearingDeg * Math.PI / 180;
+    const lat1 = lat * Math.PI / 180;
+    const lon1 = lon * Math.PI / 180;
+    const sinLat1 = Math.sin(lat1);
+    const cosLat1 = Math.cos(lat1);
+    const sinDistance = Math.sin(angularDistance);
+    const cosDistance = Math.cos(angularDistance);
+    const lat2 = Math.asin(
+        sinLat1 * cosDistance + cosLat1 * sinDistance * Math.cos(bearing)
+    );
+    const lon2 = lon1 + Math.atan2(
+        Math.sin(bearing) * sinDistance * cosLat1,
+        cosDistance - sinLat1 * Math.sin(lat2)
+    );
+    const normalizedLon = ((lon2 * 180 / Math.PI + 540) % 360) - 180;
+    return [lat2 * 180 / Math.PI, normalizedLon];
+}
+
+function renderAzimuthSectors(point, lat, lon, style, radii) {
+    const overlay = normalizeAzimuthOverlay(point, radii);
+    if (!overlay) {
         return 0;
     }
-    const color = style && style.color ? style.color : '#4dccff';
+    const color = getCoverageOverlayColor(point, style);
+    const stepDeg = 360 / overlay.count;
+    for (let index = 0; index < overlay.count; index += 1) {
+        const bearing = overlay.startDeg + index * stepDeg;
+        const endpoint = destinationPoint(lat, lon, bearing, overlay.radiusKm);
+        L.polyline([[lat, lon], endpoint], {
+            color,
+            weight: 1,
+            opacity: 0.66,
+            dashArray: '4 8',
+            pane: 'importantPathPane',
+            interactive: false,
+        }).addTo(importantPathLayer);
+
+        const labelPoint = destinationPoint(lat, lon, bearing, overlay.radiusKm + 1.2);
+        L.marker(labelPoint, {
+            icon: L.divIcon({
+                className: 'important-azimuth-label',
+                html: `<span>${Math.round(((bearing % 360) + 360) % 360)}&deg;</span>`,
+            }),
+            keyboard: false,
+            interactive: false,
+            pane: 'fixedTooltipPane',
+        }).addTo(importantPathLayer);
+    }
+    return overlay.count;
+}
+
+function renderCoverageRadii(point, lat, lon, style) {
+    const radii = normalizeCoverageRadii(point);
+    const color = getCoverageOverlayColor(point, style);
     radii.forEach((radiusKm) => {
         L.circle([lat, lon], {
             radius: radiusKm * 1000,
@@ -796,7 +985,10 @@ function renderCoverageRadii(point, lat, lon, style) {
             pane: 'fixedTooltipPane',
         }).addTo(importantPathLayer);
     });
-    return radii.length;
+    return {
+        radiusCount: radii.length,
+        azimuthCount: renderAzimuthSectors(point, lat, lon, style, radii),
+    };
 }
 
 function pathMidpoint(coords) {
@@ -831,6 +1023,14 @@ function collectImportantCoords() {
         const lon = Number(point.lon);
         if (Number.isFinite(lat) && Number.isFinite(lon)) {
             coords.push([lat, lon]);
+            const radii = normalizeCoverageRadii(point);
+            const overlay = normalizeAzimuthOverlay(point, radii);
+            const maxRadius = Math.max(...radii, overlay ? overlay.radiusKm : 0);
+            if (Number.isFinite(maxRadius) && maxRadius > 0) {
+                [0, 90, 180, 270].forEach((bearing) => {
+                    coords.push(destinationPoint(lat, lon, bearing, maxRadius));
+                });
+            }
         }
     });
 
@@ -872,13 +1072,13 @@ function fitInitialMapView(trackCoords = []) {
     });
 }
 
-function updateImportantOverlayStatus(pointCount, pathCount, warningCount) {
+function updateImportantOverlayStatus(pointCount, overlayCount, warningCount) {
     const node = document.querySelector('.important-overlay-status');
     if (!node) {
         return;
     }
     const warningText = warningCount ? ` | warnings ${warningCount}` : '';
-    node.textContent = `fixed points ${pointCount} | paths ${pathCount}${warningText}`;
+    node.textContent = `fixed points ${pointCount} | overlays ${overlayCount}${warningText}`;
 }
 
 function renderImportantPoints() {
@@ -893,6 +1093,7 @@ function renderImportantPoints() {
     let renderedPointCount = 0;
     let renderedPathCount = 0;
     let renderedRadiusCount = 0;
+    let renderedAzimuthCount = 0;
 
     points.forEach((point) => {
         const lat = Number(point.lat);
@@ -935,7 +1136,9 @@ function renderImportantPoints() {
             `</div>`
         );
         importantPointLayer.addLayer(marker);
-        renderedRadiusCount += renderCoverageRadii(point, lat, lon, style);
+        const overlayCounts = renderCoverageRadii(point, lat, lon, style);
+        renderedRadiusCount += overlayCounts.radiusCount;
+        renderedAzimuthCount += overlayCounts.azimuthCount;
         renderedPointCount += 1;
     });
 
@@ -1019,7 +1222,11 @@ function renderImportantPoints() {
             importantPathLayer.addLayer(endMarker);
         }
     });
-    updateImportantOverlayStatus(renderedPointCount, renderedPathCount + renderedRadiusCount, warnings.length);
+    updateImportantOverlayStatus(
+        renderedPointCount,
+        renderedPathCount + renderedRadiusCount + renderedAzimuthCount,
+        warnings.length
+    );
     fitInitialMapView([]);
 }
 
@@ -1172,6 +1379,261 @@ function recalculateMeasureDistance() {
     for (let index = 1; index < state.measurePoints.length; index += 1) {
         state.measureTotalMeters += map.distance(state.measurePoints[index - 1], state.measurePoints[index]);
     }
+}
+
+function removeLocalRadarLayer(statusText = 'local radar off') {
+    Object.keys(localRadarLayers).forEach((product) => {
+        map.removeLayer(localRadarLayers[product]);
+        delete localRadarLayers[product];
+    });
+    state.localRadarSignatures = {};
+    updateLocalRadarStatus(statusText);
+    updateLocalRadarLegendVisibility();
+}
+
+function removeOneLocalRadarLayer(product) {
+    const key = String(product || '').toUpperCase();
+    if (localRadarLayers[key]) {
+        map.removeLayer(localRadarLayers[key]);
+        delete localRadarLayers[key];
+    }
+    delete state.localRadarSignatures[key];
+    updateLocalRadarLegendVisibility();
+}
+
+function localRadarColor(value) {
+    if (!Number.isFinite(value) || value < -45) {
+        return null;
+    }
+    for (let index = LOCAL_RADAR_COLOR_STOPS.length - 1; index >= 0; index -= 1) {
+        if (value >= LOCAL_RADAR_COLOR_STOPS[index][0]) {
+            return LOCAL_RADAR_COLOR_STOPS[index][1];
+        }
+    }
+    return '#f3f4f6';
+}
+
+const LocalRadarCanvasLayer = L.Layer.extend({
+    initialize(payload, options = {}) {
+        this.payload = payload;
+        this.options = {
+            pane: 'localRadarPane',
+            opacity: 0.72,
+            ...options,
+        };
+        this._canvas = null;
+        this._reset = this._reset.bind(this);
+    },
+    onAdd(mapInstance) {
+        this._map = mapInstance;
+        this._canvas = L.DomUtil.create('canvas', 'leaflet-layer local-radar-layer');
+        this._canvas.style.position = 'absolute';
+        this._canvas.style.pointerEvents = 'none';
+        this.getPane().appendChild(this._canvas);
+        mapInstance.on('move zoom resize viewreset', this._reset);
+        this._reset();
+    },
+    onRemove(mapInstance) {
+        mapInstance.off('move zoom resize viewreset', this._reset);
+        if (this._canvas && this._canvas.parentNode) {
+            this._canvas.parentNode.removeChild(this._canvas);
+        }
+        this._canvas = null;
+    },
+    setOpacity(opacity) {
+        this.options.opacity = Math.max(0, Math.min(1, Number(opacity) || 0));
+        if (this._canvas) {
+            this._canvas.style.opacity = String(this.options.opacity);
+        }
+    },
+    setPayload(payload) {
+        this.payload = payload;
+        this._reset();
+    },
+    _reset() {
+        if (!this._map || !this._canvas) {
+            return;
+        }
+        const size = this._map.getSize();
+        const topLeft = this._map.containerPointToLayerPoint([0, 0]);
+        L.DomUtil.setPosition(this._canvas, topLeft);
+        this._canvas.width = size.x;
+        this._canvas.height = size.y;
+        this._canvas.style.width = `${size.x}px`;
+        this._canvas.style.height = `${size.y}px`;
+        this._canvas.style.opacity = String(this.options.opacity);
+        this._draw();
+    },
+    _draw() {
+        const ctx = this._canvas.getContext('2d');
+        const width = this._canvas.width;
+        const height = this._canvas.height;
+        ctx.clearRect(0, 0, width, height);
+        const payload = this.payload || {};
+        const radar = payload.radar || {};
+        const centerLat = Number(radar.lat);
+        const centerLon = Number(radar.lon);
+        const azimuths = Array.isArray(payload.azimuths_deg) ? payload.azimuths_deg : [];
+        const ranges = Array.isArray(payload.ranges_km) ? payload.ranges_km : [];
+        const rows = Array.isArray(payload.values) ? payload.values : [];
+        if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon) || !azimuths.length || !ranges.length || !rows.length) {
+            return;
+        }
+        const azStep = Number(payload.azimuth_step_deg) || 2;
+        const rangeBin = Number(payload.range_bin_km) || 0.3;
+        ctx.globalAlpha = 1;
+        for (let rowIndex = 0; rowIndex < azimuths.length; rowIndex += 1) {
+            const row = rows[rowIndex] || [];
+            const azimuth = Number(azimuths[rowIndex]);
+            if (!Number.isFinite(azimuth)) {
+                continue;
+            }
+            const az0 = azimuth - azStep / 2;
+            const az1 = azimuth + azStep / 2;
+            for (let colIndex = 0; colIndex < ranges.length; colIndex += 1) {
+                if (row[colIndex] === null || row[colIndex] === undefined) {
+                    continue;
+                }
+                const value = Number(row[colIndex]);
+                const color = localRadarColor(value);
+                if (!color) {
+                    continue;
+                }
+                const rangeCenter = Number(ranges[colIndex]);
+                if (!Number.isFinite(rangeCenter)) {
+                    continue;
+                }
+                const inner = Math.max(0, rangeCenter - rangeBin / 2);
+                const outer = rangeCenter + rangeBin / 2;
+                const corners = [
+                    destinationPoint(centerLat, centerLon, az0, inner),
+                    destinationPoint(centerLat, centerLon, az0, outer),
+                    destinationPoint(centerLat, centerLon, az1, outer),
+                    destinationPoint(centerLat, centerLon, az1, inner),
+                ].map((latlng) => this._map.latLngToContainerPoint(latlng));
+                ctx.beginPath();
+                ctx.moveTo(corners[0].x, corners[0].y);
+                for (let index = 1; index < corners.length; index += 1) {
+                    ctx.lineTo(corners[index].x, corners[index].y);
+                }
+                ctx.closePath();
+                ctx.fillStyle = color;
+                ctx.fill();
+            }
+        }
+    },
+});
+
+function formatLocalRadarTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+        return '--:--';
+    }
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+function getEnabledLocalRadarProducts() {
+    return getLocalRadarProducts()
+        .map((item) => String(item).toUpperCase())
+        .filter((product) => state.localRadarProductsEnabled[product]);
+}
+
+async function refreshOneLocalRadarLayer(product, force = false) {
+    const key = String(product || '').toUpperCase();
+    try {
+        const params = new URLSearchParams({ product: key });
+        if (force) {
+            params.set('force', 'true');
+        }
+        const response = await fetch(`/api/local-radar/latest?${params.toString()}`, { cache: 'no-store' });
+        if (!response.ok) {
+            throw new Error(`status ${response.status}`);
+        }
+        const payload = await response.json();
+        if (!payload.available) {
+            throw new Error(payload.error || `no ${key} local radar data`);
+        }
+        const signature = [
+            payload.filename,
+            payload.scan_time,
+            payload.scan_product,
+            payload.variable,
+            payload.angle,
+        ].join('|');
+        if (signature === state.localRadarSignatures[key] && localRadarLayers[key]) {
+            return payload;
+        }
+        state.localRadarSignatures[key] = signature;
+        if (!localRadarLayers[key]) {
+            localRadarLayers[key] = new LocalRadarCanvasLayer(payload, {
+                opacity: state.localRadarOpacity,
+                pane: 'localRadarPane',
+            }).addTo(map);
+        } else {
+            localRadarLayers[key].setPayload(payload);
+            localRadarLayers[key].setOpacity(state.localRadarOpacity);
+        }
+        const pane = map.getPane('localRadarPane');
+        if (pane && localRadarLayers.PPI && localRadarLayers.RPI) {
+            const ppiCanvas = localRadarLayers.PPI._canvas;
+            const rpiCanvas = localRadarLayers.RPI._canvas;
+            if (ppiCanvas && rpiCanvas && ppiCanvas.nextSibling !== rpiCanvas) {
+                pane.insertBefore(ppiCanvas, rpiCanvas);
+            }
+        }
+        return payload;
+    } catch (error) {
+        console.warn(`[local-radar] ${key} layer failed:`, error);
+        removeOneLocalRadarLayer(key);
+        return null;
+    }
+}
+
+async function refreshLocalRadarLayer(force = false) {
+    if (!state.localRadarEnabled) {
+        removeLocalRadarLayer('local radar off');
+        return;
+    }
+    if (!state.mapConfig.local_radar_available) {
+        removeLocalRadarLayer('local radar unavailable');
+        return;
+    }
+
+    const now = Date.now();
+    const refreshMs = Math.max(5, Number(state.mapConfig.local_radar_refresh_seconds) || 30) * 1000;
+    if (!force && Object.keys(localRadarLayers).length && now - state.localRadarLastApiFetchAt < refreshMs) {
+        return;
+    }
+
+    const enabledProducts = getEnabledLocalRadarProducts();
+    ['PPI', 'RPI'].forEach((product) => {
+        if (!enabledProducts.includes(product)) {
+            removeOneLocalRadarLayer(product);
+        }
+    });
+    if (!enabledProducts.length) {
+        removeLocalRadarLayer('local radar no product');
+        return;
+    }
+
+    updateLocalRadarStatus('local radar loading');
+    const payloads = [];
+    for (const product of enabledProducts) {
+        const payload = await refreshOneLocalRadarLayer(product, force);
+        if (payload) {
+            payloads.push(payload);
+        }
+    }
+    state.localRadarLastApiFetchAt = now;
+    if (!payloads.length) {
+        removeLocalRadarLayer('local radar unavailable');
+        return;
+    }
+    const statusText = payloads
+        .map((payload) => `${payload.scan_product} ${formatLocalRadarTime(payload.scan_time)}`)
+        .join(' / ');
+    updateLocalRadarStatus(`local ${statusText}`);
+    updateLocalRadarLegendVisibility();
 }
 
 function undoMeasurePoint() {
@@ -2700,7 +3162,9 @@ async function loadMapConfig() {
         state.mapConfig = { ...DEFAULT_MAP_CONFIG };
     }
     setRadarOpacity(state.mapConfig.rainviewer_default_opacity);
+    setLocalRadarOpacity(state.mapConfig.local_radar_default_opacity);
     populateHimawariProducts();
+    populateLocalRadarProducts();
 
     if (elements.mapSource) {
         const localOption = elements.mapSource.querySelector('option[value="local"]');
@@ -2712,6 +3176,7 @@ async function loadMapConfig() {
     applyBaseTileLayer(state.mapConfig.has_local_tiles ? 'local' : 'online');
     refreshHimawariLayer(true);
     refreshRadarLayer(true);
+    refreshLocalRadarLayer(true);
 }
 
 async function loadImportantPoints() {
@@ -2831,6 +3296,32 @@ function bindEvents() {
     if (elements.radarOpacity) {
         elements.radarOpacity.addEventListener('input', () => {
             setRadarOpacity((Number(elements.radarOpacity.value) || 0) / 100);
+        });
+    }
+    if (elements.localRadarEnabled) {
+        state.localRadarEnabled = elements.localRadarEnabled.checked;
+        elements.localRadarEnabled.addEventListener('change', () => {
+            state.localRadarEnabled = elements.localRadarEnabled.checked;
+            refreshLocalRadarLayer(true);
+        });
+    }
+    if (elements.localRadarPpiEnabled) {
+        state.localRadarProductsEnabled.PPI = elements.localRadarPpiEnabled.checked;
+        elements.localRadarPpiEnabled.addEventListener('change', () => {
+            state.localRadarProductsEnabled.PPI = elements.localRadarPpiEnabled.checked;
+            refreshLocalRadarLayer(true);
+        });
+    }
+    if (elements.localRadarRpiEnabled) {
+        state.localRadarProductsEnabled.RPI = elements.localRadarRpiEnabled.checked;
+        elements.localRadarRpiEnabled.addEventListener('change', () => {
+            state.localRadarProductsEnabled.RPI = elements.localRadarRpiEnabled.checked;
+            refreshLocalRadarLayer(true);
+        });
+    }
+    if (elements.localRadarOpacity) {
+        elements.localRadarOpacity.addEventListener('input', () => {
+            setLocalRadarOpacity((Number(elements.localRadarOpacity.value) || 0) / 100);
         });
     }
     if (elements.measureDistanceEnabled) {
@@ -3053,6 +3544,7 @@ async function init() {
     openWebSocket();
     setInterval(() => refreshHimawariLayer(false), HIMAWARI_API_REFRESH_MS);
     setInterval(() => refreshRadarLayer(false), RAINVIEWER_API_REFRESH_MS);
+    setInterval(() => refreshLocalRadarLayer(false), LOCAL_RADAR_API_REFRESH_MS);
     setTimeout(() => {
         resizeCharts();
         updateMapMiniMode();

@@ -9,8 +9,8 @@ SOURCE_MWR_FILE = Path('G:/WR_YMWR/B11/20260303/Z_UPAR_I_59134_20260303000000_P_
 # Realtime simulator output files.
 SIM_OUTPUT_DIR = Path('simulated_data')
 
-DATE1 = "2026-05-17"
-DATE2 = "20260517"
+DATE1 = "2026-05-29"
+DATE2 = "20260529"
 NUM = 1
 TRACK_FILE = Path(f'G:/B11/{DATE1}_{NUM}/{DATE2}_{NUM}_B11.csv')
 SCDP_FILE = Path(f'G:/B11/{DATE1}_{NUM}/WR_SCDP/SCDP_B11_{DATE2}.csv')
@@ -61,6 +61,22 @@ RAINVIEWER_DEFAULT_OPACITY = 0.55
 RAINVIEWER_COLOR_SCHEME = 2
 RAINVIEWER_SMOOTH = 1
 RAINVIEWER_SNOW = 1
+
+# Local cloud radar polar overlay.
+LOCAL_RADAR_BASE_DIR = Path(r'D:/APP/radar_uploader_split/downloads') / DATE2
+LOCAL_RADAR_PRODUCTS = ['PPI', 'RPI']
+LOCAL_RADAR_DEFAULT_PRODUCT = 'PPI'
+LOCAL_RADAR_VARIABLE = 'Z2'
+LOCAL_RADAR_REFRESH_SECONDS = 20
+LOCAL_RADAR_MAX_RANGE_KM = 50.0
+LOCAL_RADAR_GATE_RESOLUTION_KM = 0.03
+LOCAL_RADAR_RANGE_BIN_KM = 0.3
+LOCAL_RADAR_AZIMUTH_STEP_DEG = 2.0
+LOCAL_RADAR_DEFAULT_OPACITY = 0.72
+LOCAL_RADAR_LAT = 20.96194444
+LOCAL_RADAR_LON = 110.06777778
+LOCAL_RADAR_SITE_NAME = '雷州云雷达'
+
 HIMAWARI_FD_TARGET_TIMES_URL = 'https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes_fd.json'
 HIMAWARI_JP_TARGET_TIMES_URL = 'https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes_jp.json'
 HIMAWARI_FD_TILE_URL_TEMPLATE = 'https://www.jma.go.jp/bosai/himawari/data/satimg/{base_time}/fd/{valid_time}/{band}/{product}/{z}/{x}/{y}.{format}'
