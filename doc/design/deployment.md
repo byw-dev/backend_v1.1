@@ -1,25 +1,55 @@
 # 运行与发布 | BY Weather Backend v1.1
 
 > 文档版本：1.0  
-> 相关文件：`launcher.py`、`config.py`、`TEST_BYW.spec`
+> 相关文件：`environment.yml`、`launcher.py`、`config.py`、`TEST_BYW.spec`
+
+## 包管理理念
+
+**Conda 环境、Python 3.9、单机 B/S、发布目录可直接运行**。
+
+项目以 [environment.yml](../../environment.yml) 作为 Python 包管理入口，默认环境名为 `py3.9`。开发机、现场机和打包机应尽量使用同一份 Conda 环境文件恢复依赖，避免依赖隐藏在个人 base 环境中。
+
+当前环境覆盖三类依赖：
+
+- Web 服务运行：`fastapi`、`uvicorn`、`requests`。
+- 数据处理与本地云雷达：`numpy`、`scipy`、`pandas`、`xarray`。
+- 试验脚本与发布打包：`matplotlib`、`paramiko`、`pyinstaller`。
+
+首次创建环境：
+
+```bash
+conda env create -f environment.yml
+conda activate py3.9
+```
+
+已有环境更新：
+
+```bash
+conda env update -n py3.9 -f environment.yml --prune
+conda activate py3.9
+```
+
+从当前环境回写依赖清单时，优先人工维护 `environment.yml` 中的顶层依赖；如需完整锁定现场环境，可另行导出完整快照：
+
+```bash
+conda env export -n py3.9 > environment.lock.yml
+```
+
+`environment.lock.yml` 适合现场留档，不建议替代 `environment.yml` 作为日常维护入口。
 
 ## 开发运行
 
 推荐使用启动器：
 
 ```bash
+conda activate py3.9
 python launcher.py
 ```
 
 直接运行 FastAPI：
 
 ```bash
-python app.py
-```
-
-或：
-
-```bash
+conda activate py3.9
 python -m uvicorn app:app --host 127.0.0.1 --port 8000
 ```
 
