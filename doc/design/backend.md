@@ -53,6 +53,7 @@ def _runtime_base_dir() -> Path:
 - `frontend/` 存在时挂载到 `/static`。
 - `map_tiles/` 存在时挂载到 `/tiles`。
 - `/` 返回 `frontend/index.html`。
+- `/login` 返回内置登录页；登录成功后通过 HTTP-only cookie 保存本地签名会话。
 
 ## 全局对象
 
@@ -88,15 +89,21 @@ manager = ConnectionManager()
 
 用途：排查文件是否读取、header 是否识别、是否使用 fallback、数据是否正在增长。
 
+权限语义：精简账号不会返回 `file_states`、各源缓存数量、MWR 到达延迟等排障细节，只返回最新时间、aligned 数量、轮询间隔和历史窗口。
+
 ### GET `/api/latest`
 
 返回最新 `AlignedFrame`。如果尚未生成对齐帧，返回空对象 `{}`。
+
+权限语义：精简账号的 `scdp`、`icfp`、`mwr` 模块会被替换为 `status = "hidden"` 和空数据，只保留地图/航迹展示需要的内容。
 
 ### GET `/api/history?seconds=300`
 
 返回最近窗口内的对齐帧数组。请求值会被 `MAX_HISTORY_SECONDS` 截断。
 
 注意：当前实现按最近 N 条对齐帧切片，不是严格按时间戳过滤。
+
+权限语义同 `/api/latest`，历史帧会按当前账号角色逐帧过滤。
 
 ### GET `/api/map-config`
 
@@ -108,6 +115,16 @@ manager = ConnectionManager()
 - RainViewer 参数。
 - 本地云雷达目录可用性、PPI/RPI 产品列表、刷新间隔、默认透明度、最大探测半径和雷达站经纬度。
 - Himawari 产品列表与刷新间隔。
+
+### GET `/api/data-source`
+
+返回当前运行时数据日期、`DATE2`、架次 `num`、默认日期/架次和四类业务文件路径。该接口反映本次进程内临时选择，不代表源码配置已被修改。
+
+### POST `/api/data-source`
+
+接收 `date1`（`YYYY-MM-DD`）和 `num`（正整数），在当前进程内临时切换 Track、SCDP、ICFP、MWR 数据路径，并清空后端内存缓存、文件游标、MWR pending 和本地云雷达缓存。
+
+该接口不写入 `config.py`，也不写入外部配置文件；程序重启后仍使用 `config.py` 中的默认 `DATE1`、`DATE2`、`NUM`。
 
 ### GET `/api/local-radar/latest?product=PPI`
 
@@ -122,6 +139,8 @@ manager = ConnectionManager()
 - 接口结果按 `LOCAL_RADAR_REFRESH_SECONDS` 做内存缓存，当前默认 20 秒；传入 `force=true` 时跳过缓存重新扫描/读取。
 
 返回数据是极坐标绘制数据，不是瓦片，也不是历史序列。前端负责按地图投影绘制 Canvas 图层。
+
+权限语义：仅具备 `view_local_radar` 权限的账号可访问；精简账号访问时返回 `403`。精简前端隐藏本地云雷达控件、状态控件和色标，且不会请求该接口。
 
 ### GET `/api/himawari/latest`
 
@@ -153,14 +172,26 @@ manager = ConnectionManager()
 - `azimuth_radius_km`
 - `azimuth_start_deg`
 
+### POST `/api/login`
+
+校验 `config.AUTH_USERS` 中的内置账号，成功后写入签名会话 cookie。账号角色来自配置中的 `role` 字段。
+
+### POST `/api/logout`
+
+清除会话 cookie。
+
+### GET `/api/me`
+
+返回当前登录账号、角色和权限列表，前端据此切换完整界面或 lite 大地图界面。
+
 ## WebSocket
 
 ### WS `/ws/realtime`
 
-客户端连接后进入被动接收模式。后台每生成或回填一个 `AlignedFrame`，调用：
+客户端连接后进入被动接收模式。后台每生成或回填一个 `AlignedFrame`，按连接账号角色过滤后广播：
 
 ```python
-await manager.broadcast(frame.to_dict())
+await manager.broadcast(frame.to_dict(), prepare=_frame_for_user)
 ```
 
 客户端断开或发送异常时，`ConnectionManager` 会移除连接。

@@ -6,6 +6,9 @@ from typing import Any, Dict
 class InMemoryStore:
     def __init__(self, max_history_seconds: int = 3600):
         self.max_history_seconds = max_history_seconds
+        self.reset()
+
+    def reset(self):
 
         self.track_store: 'OrderedDict[datetime, Any]' = OrderedDict()
         self.scdp_store: 'OrderedDict[datetime, Any]' = OrderedDict()

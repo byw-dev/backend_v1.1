@@ -17,7 +17,7 @@ const REPLAY_MAP_RENDER_INTERVAL_MS = 1000;
 const REPLAY_CHART_RENDER_INTERVAL_MS = 1200;
 const REPLAY_HEATMAP_RENDER_INTERVAL_MS = 2000;
 const MAP_MINI_VISIBLE_RATIO = 0.35;
-const FRONTEND_BUILD = '2026-05-29-local-radar-20s';
+const FRONTEND_BUILD = '2026-06-13-lite-local-radar-hide';
 const AREA_BOUNDARY_WARNING_DEG = 0.02;
 const EARTH_RADIUS_KM = 6371.0088;
 const MAX_AZIMUTH_SECTOR_COUNT = 72;
@@ -105,10 +105,12 @@ const DEFAULT_PATH_STYLE = {
 const VALID_MARKER_SHAPES = new Set(['circle', 'square', 'diamond', 'triangle']);
 console.info('[frontend build]', FRONTEND_BUILD);
 const state = {
+    currentUser: null,
     frames: [],
     pendingFrames: [],
     maxHistorySeconds: 3600,
     windowMinutes: 10,
+    dataSource: null,
     replayPointIntervalSec: 10,
     replayEntries: [],
     replayLayerSignature: '',
@@ -180,6 +182,8 @@ const elements = {
     latestTime: document.getElementById('latest-time'),
     currentDate: document.getElementById('current-date'),
     historyLimit: document.getElementById('history-limit'),
+    userRole: document.getElementById('user-role'),
+    logoutBtn: document.getElementById('logout-btn'),
     trackSummary: document.getElementById('track-summary'),
     scdpStatus: document.getElementById('scdp-status'),
     icfpStatus: document.getElementById('icfp-status'),
@@ -189,6 +193,10 @@ const elements = {
     windowMinutes: document.getElementById('window-minutes'),
     replayPointSeconds: document.getElementById('replay-point-seconds'),
     applyWindow: document.getElementById('apply-window'),
+    dataSourceDate: document.getElementById('data-source-date'),
+    dataSourceNum: document.getElementById('data-source-num'),
+    applyDataSource: document.getElementById('apply-data-source'),
+    dataSourceNote: document.getElementById('data-source-note'),
     liveModeBtn: document.getElementById('live-mode-btn'),
     replayModeBtn: document.getElementById('replay-mode-btn'),
     replayPlayBtn: document.getElementById('replay-play-btn'),
@@ -228,10 +236,95 @@ const elements = {
     boundaryRight: document.getElementById('boundary-right'),
     boundaryTop: document.getElementById('boundary-top'),
     boundaryBottom: document.getElementById('boundary-bottom'),
+    dashboard: document.querySelector('.dashboard'),
+    centerStack: document.querySelector('.center-stack'),
     mapPanel: document.querySelector('.panel-map'),
     scdpBinsChart: document.getElementById('scdp-bins-chart'),
     icfpBinsChart: document.getElementById('icfp-bins-chart'),
 };
+
+function hasPermission(permission) {
+    if (!state.currentUser || !Array.isArray(state.currentUser.permissions)) {
+        return false;
+    }
+    return state.currentUser.permissions.includes('view_all')
+        || state.currentUser.permissions.includes(permission);
+}
+
+function setPermissionVisibility(selector, visible) {
+    document.querySelectorAll(selector).forEach((node) => {
+        node.classList.toggle('hidden', !visible);
+    });
+}
+
+function applyUserPermissions() {
+    const user = state.currentUser || {};
+    const canViewCharts = hasPermission('view_charts');
+    const canViewLocalRadar = hasPermission('view_local_radar');
+    document.body.dataset.role = user.role || 'unknown';
+    document.body.dataset.canLocalRadar = canViewLocalRadar ? 'true' : 'false';
+    if (elements.dashboard) {
+        elements.dashboard.classList.toggle('dashboard-lite', !canViewCharts);
+    }
+    if (elements.centerStack) {
+        elements.centerStack.classList.toggle('center-stack-lite', !canViewCharts);
+    }
+    setPermissionVisibility('.permission-charts', canViewCharts);
+    setPermissionVisibility('.permission-local-radar', canViewLocalRadar);
+    if (elements.userRole) {
+        elements.userRole.textContent = user.username || user.role || '--';
+    }
+    const localRadarStatusNode = document.querySelector('.local-radar-status');
+    if (localRadarStatusNode) {
+        localRadarStatusNode.classList.toggle('hidden', !canViewLocalRadar);
+    }
+    const localRadarLegendNode = document.querySelector('.local-radar-legend');
+    if (localRadarLegendNode) {
+        localRadarLegendNode.classList.toggle('hidden', !canViewLocalRadar || !state.localRadarEnabled);
+    }
+    if (!canViewLocalRadar) {
+        state.localRadarEnabled = false;
+        if (elements.localRadarEnabled) {
+            elements.localRadarEnabled.checked = false;
+        }
+        [
+            elements.localRadarEnabled,
+            elements.localRadarPpiEnabled,
+            elements.localRadarRpiEnabled,
+            elements.localRadarOpacity,
+        ].filter(Boolean).forEach((node) => {
+            node.disabled = true;
+        });
+        removeLocalRadarLayer('local radar unavailable');
+    } else {
+        [
+            elements.localRadarEnabled,
+            elements.localRadarPpiEnabled,
+            elements.localRadarRpiEnabled,
+            elements.localRadarOpacity,
+        ].filter(Boolean).forEach((node) => {
+            node.disabled = false;
+        });
+    }
+    resizeCharts();
+    setTimeout(() => {
+        map.invalidateSize();
+        updateMapMiniMode();
+    }, 0);
+}
+
+async function loadCurrentUser() {
+    const response = await fetch('/api/me', { cache: 'no-store' });
+    if (response.status === 401) {
+        location.href = '/login';
+        throw new Error('login required');
+    }
+    if (!response.ok) {
+        throw new Error(`me status ${response.status}`);
+    }
+    state.currentUser = await response.json();
+    applyUserPermissions();
+}
 
 const charts = {
     scdpSeries: echarts.init(document.getElementById('scdp-series-chart')),
@@ -1590,6 +1683,10 @@ async function refreshOneLocalRadarLayer(product, force = false) {
 }
 
 async function refreshLocalRadarLayer(force = false) {
+    if (!hasPermission('view_local_radar')) {
+        removeLocalRadarLayer('local radar unavailable');
+        return;
+    }
     if (!state.localRadarEnabled) {
         removeLocalRadarLayer('local radar off');
         return;
@@ -3062,6 +3159,68 @@ function updateWindowLimitIndicator() {
     setPillState(elements.historyLimit, requestedMinutes > effectiveLimit ? 'pill-alert' : 'pill-neutral');
 }
 
+function applyDataSourceToInputs(data) {
+    if (!data) {
+        return;
+    }
+    state.dataSource = data;
+    if (elements.dataSourceDate) {
+        elements.dataSourceDate.value = data.date1 || '';
+    }
+    if (elements.dataSourceNum) {
+        elements.dataSourceNum.value = String(data.num || 1);
+    }
+    if (elements.dataSourceNote) {
+        const defaultText = data.default_date1 && data.default_num
+            ? `默认 ${data.default_date1} / ${data.default_num} 架次`
+            : '重启后恢复默认日期';
+        elements.dataSourceNote.textContent = `当前 ${data.date1 || '--'} / ${data.num || '--'} 架次；${defaultText}`;
+    }
+}
+
+function clearLoadedRuntimeData() {
+    stopReplay();
+    state.frames = [];
+    state.pendingFrames = [];
+    state.selectedFrameTime = null;
+    state.replayEntries = [];
+    state.replayLayerSignature = '';
+    state.trackRenderSignature = '';
+    state.initialMapFitted = false;
+    renderAll();
+}
+
+async function loadDataSource() {
+    const response = await fetch('/api/data-source', { cache: 'no-store' });
+    if (!response.ok) {
+        throw new Error(`data-source status ${response.status}`);
+    }
+    applyDataSourceToInputs(await response.json());
+}
+
+async function applyDataSource() {
+    if (!elements.dataSourceDate || !elements.dataSourceNum) {
+        return;
+    }
+    const response = await fetch('/api/data-source', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            date1: elements.dataSourceDate.value,
+            num: Number(elements.dataSourceNum.value) || 1,
+        }),
+    });
+    if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail || `data-source status ${response.status}`);
+    }
+    applyDataSourceToInputs(await response.json());
+    clearLoadedRuntimeData();
+    await loadStatus();
+    await loadMapConfig();
+    await loadHistory();
+}
+
 function updateBinVisibility() {
     elements.scdpBinsChart.classList.toggle('hidden', !elements.showScdpBins.checked);
     elements.icfpBinsChart.classList.toggle('hidden', !elements.showIcfpBins.checked);
@@ -3108,14 +3267,17 @@ function renderAll() {
     const selectedFrame = getSelectedFrame();
     updateMeta(selectedFrame);
     updateReplayControls();
+    const canViewCharts = hasPermission('view_charts');
 
     if (state.mode !== 'replay') {
         updateTrackMapFast(displayFrames);
-        updateScdpCharts(selectedFrame, displayFrames);
-        updateIcfpCharts(selectedFrame, displayFrames);
-        updateMwrScalarChart(selectedFrame, displayFrames);
-        updateMwrProfileCharts(selectedFrame);
-        updateMwrZoneChart(selectedFrame, displayFrames);
+        if (canViewCharts) {
+            updateScdpCharts(selectedFrame, displayFrames);
+            updateIcfpCharts(selectedFrame, displayFrames);
+            updateMwrScalarChart(selectedFrame, displayFrames);
+            updateMwrProfileCharts(selectedFrame);
+            updateMwrZoneChart(selectedFrame, displayFrames);
+        }
         return;
     }
 
@@ -3128,14 +3290,14 @@ function renderAll() {
         updateTrackMapFast(displayFrames);
         state.replayLastMapRenderAt = now;
     }
-    if (shouldRenderCharts) {
+    if (canViewCharts && shouldRenderCharts) {
         updateScdpCharts(selectedFrame, displayFrames);
         updateIcfpCharts(selectedFrame, displayFrames);
         updateMwrScalarChart(selectedFrame, displayFrames);
         updateMwrProfileCharts(selectedFrame);
         state.replayLastChartRenderAt = now;
     }
-    if (shouldRenderHeatmap) {
+    if (canViewCharts && shouldRenderHeatmap) {
         updateMwrZoneChart(selectedFrame, displayFrames);
         state.replayLastHeatmapRenderAt = now;
     }
@@ -3145,6 +3307,9 @@ async function loadStatus() {
     const response = await fetch('/api/status');
     const data = await response.json();
     state.maxHistorySeconds = data.max_history_seconds || 3600;
+    if (data.data_source) {
+        applyDataSourceToInputs(data.data_source);
+    }
     elements.windowMinutes.max = String(Math.min(MAX_WINDOW_MINUTES, Math.max(1, Math.floor(state.maxHistorySeconds / 60))));
     updateWindowLimitIndicator();
 }
@@ -3176,7 +3341,9 @@ async function loadMapConfig() {
     applyBaseTileLayer(state.mapConfig.has_local_tiles ? 'local' : 'online');
     refreshHimawariLayer(true);
     refreshRadarLayer(true);
-    refreshLocalRadarLayer(true);
+    if (hasPermission('view_local_radar')) {
+        refreshLocalRadarLayer(true);
+    }
 }
 
 async function loadImportantPoints() {
@@ -3244,6 +3411,12 @@ function openWebSocket() {
 }
 
 function bindEvents() {
+    if (elements.logoutBtn) {
+        elements.logoutBtn.addEventListener('click', async () => {
+            await fetch('/api/logout', { method: 'POST' });
+            location.href = '/login';
+        });
+    }
     elements.applyWindow.addEventListener('click', async () => {
         const requested = Number(elements.windowMinutes.value) || 10;
         const allowed = Math.min(MAX_WINDOW_MINUTES, Math.max(1, Math.floor(state.maxHistorySeconds / 60)));
@@ -3252,6 +3425,21 @@ function bindEvents() {
         setMode('live');
         updateWindowLimitIndicator();
     });
+    if (elements.applyDataSource) {
+        elements.applyDataSource.addEventListener('click', async () => {
+            try {
+                elements.applyDataSource.disabled = true;
+                await applyDataSource();
+            } catch (error) {
+                console.warn('[data-source] apply failed:', error);
+                if (elements.dataSourceNote) {
+                    elements.dataSourceNote.textContent = `日期切换失败: ${error.message}`;
+                }
+            } finally {
+                elements.applyDataSource.disabled = false;
+            }
+        });
+    }
 
     elements.windowMinutes.addEventListener('input', updateWindowLimitIndicator);
     if (elements.replayPointSeconds) {
@@ -3532,12 +3720,14 @@ function bindEvents() {
 }
 
 async function init() {
+    await loadCurrentUser();
     bindEvents();
     updateZoomStatus();
     syncReplayPointInterval();
     updateBinVisibility();
     await loadMapConfig();
     await loadImportantPoints();
+    await loadDataSource();
     await loadStatus();
     await loadHistory();
     setMode('live');

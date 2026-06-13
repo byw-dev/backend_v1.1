@@ -26,6 +26,13 @@
 | 左侧控制栏 | 时间窗口、回放、地图图层、雷达/卫星、测距、锚点、区域边界、粒子谱显示。 |
 | 主工作区 | 中央地图与时序图，右侧 MWR/SCDP/ICFP 图表。 |
 
+登录后前端会调用 `/api/me` 获取当前账号和权限：
+
+- `full` 角色显示完整三列指挥界面：左控制栏、中央地图/时序图、右侧传感器图表。
+- `lite` 角色参考 `backend_lite` 的地图态势界面，给 `.dashboard` 添加 `dashboard-lite`、给 `.center-stack` 添加 `center-stack-lite`，隐藏时序图和右侧传感器图表，并让航线/卫星地图扩大填充原时序图和右侧图表区域。
+- `lite` 角色隐藏本地云雷达相关 UI，包括总开关、PPI、RPI、云雷达透明度、地图状态控件和色标，不发起 `/api/local-radar/latest` 请求。本地云雷达控件在 CSS 初始状态下默认隐藏，仅当 `/api/me` 返回的权限包含 `view_local_radar` 后显示，避免 Lite 页面加载早期露出控件。
+- 顶部账号显示使用登录用户名，例如 lite 账号显示为 `lite`。
+
 主要容器：
 
 - `#track-map`
@@ -59,14 +66,18 @@ DOM 引用集中在 `dom` 对象，图表实例集中在 `charts` 对象。
 前端启动时主要调用：
 
 - `/api/map-config`
-- `/api/local-radar/latest?product=PPI`
-- `/api/local-radar/latest?product=RPI`
+- `/api/data-source`
+- `/api/local-radar/latest?product=PPI`（仅具备本地云雷达权限时请求）
+- `/api/local-radar/latest?product=RPI`（仅具备本地云雷达权限时请求）
 - `/api/history`
 - `/api/latest`
 - `/api/important-points`
+- `/api/me`
 - `/ws/realtime`
 
 实时模式下，WebSocket 新帧会进入历史数组并刷新地图与图表。回放模式下，用户通过 slider 或播放按钮选取历史帧。
+
+full 和 lite 账号都显示数据日期与架次输入。点击“应用日期”后前端调用 `/api/data-source`，清空当前已加载历史帧、回放缓存和地图轨迹，再重新拉取状态、地图配置和历史数据。该选择只在当前进程内生效，重启后恢复 `config.py` 默认日期和架次。
 
 ## 地图图层
 
@@ -94,6 +105,7 @@ Leaflet 地图包含：
 本地云雷达刷新机制：
 
 - 页面加载 `/api/map-config` 后获得 `local_radar_refresh_seconds`，默认 20 秒。
+- 若账号不具备 `view_local_radar` 权限，前端隐藏本地云雷达控件、状态控件和色标，不发起数据请求。
 - 总开关关闭时移除本地云雷达图层，不发起读取。
 - 总开关开启后，按已勾选产品分别请求 `/api/local-radar/latest?product=PPI`、`/api/local-radar/latest?product=RPI`。
 - 定时刷新时，如果距离上次刷新不足配置间隔且已有图层，则跳过本轮请求。

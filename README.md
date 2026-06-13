@@ -45,6 +45,7 @@ python launcher.py
 - **地图态势**：Leaflet 展示航迹、当前飞机位置、离线/在线/卫星底图、固定点位、重点路径、探测半径和方位线。
 - **雷达与卫星叠加**：支持 RainViewer 全球雷达、RainViewer 覆盖范围、Himawari-9 云图、本地云雷达 PPI/RPI。
 - **本地云雷达**：从 `PPICMA` / `RPICMA` 目录读取 CMA/Z_RADA 径向基数据，按最新文件叠加到地图，PPI 在下层、RPI 在上层，带 dBZ 色标和扫描时间显示。
+- **登录与权限分区**：支持内置账号、全量视图和精简视图。全量账号可查看全部图表和本地云雷达；精简账号使用接近 `backend_lite` 的大地图态势界面，并隐藏本地云雷达控件，后端 API 与 WebSocket 同步过滤 SCDP/ICFP/MWR 数据。
 - **交互工具**：支持历史回放、地图点击选帧、测距、锚点、锚点表格和 TXT 导出、区域边界提示。
 - **图表展示**：展示 SCDP/ICFP 时序和 bins，MWR 标量、温度/湿度/水汽密度/液态水廓线，以及饱和区热力图。
 
@@ -113,6 +114,8 @@ python get_radar/radar_latlon_grid_demo.py
 - `LOCAL_RADAR_REFRESH_SECONDS`：本地云雷达刷新/缓存间隔，当前默认 20 秒。
 - `LOCAL_RADAR_LAT`、`LOCAL_RADAR_LON`、`LOCAL_RADAR_SITE_NAME`：本地云雷达站点位置和名称。
 - `IMPORTANT_POINTS_FILE`：重点点位、重点路径、探测半径和方位线配置。
+- `AUTH_ENABLED`、`AUTH_USERS`、`ROLE_PERMISSIONS`：登录开关、内置账号和角色权限配置。
+- 页面“数据日期/架次”只做当前运行时临时切换，不写回 `config.py`；重启后仍使用上面的默认 `DATE1`、`DATE2`、`NUM`。
 
 本地云雷达读取路径示例：
 
@@ -128,9 +131,11 @@ D:\APP\radar_uploader_split\downloads\20260529\RPICMA
 - `GET /api/latest`：返回最新对齐帧。
 - `GET /api/history?seconds=300`：返回最近窗口内的对齐帧列表。
 - `GET /api/map-config`：返回底图、全球雷达、本地云雷达、Himawari 等地图配置。
+- `GET /api/data-source`、`POST /api/data-source`：查看或临时切换当前运行时数据日期和架次，不持久化。
 - `GET /api/himawari/latest`：返回最新 Himawari 图层元数据。
 - `GET /api/local-radar/latest?product=PPI`：读取并返回最新本地云雷达 PPI/RPI 极坐标数据。
 - `GET /api/important-points`：返回重点点位、重点路径、探测半径和方位线配置。
+- `POST /api/login`、`POST /api/logout`、`GET /api/me`：登录、退出和当前账号权限。
 - `WS /ws/realtime`：实时推送 `AlignedFrame`。
 
 ## 本地云雷达说明

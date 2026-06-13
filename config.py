@@ -9,8 +9,8 @@ SOURCE_MWR_FILE = Path('G:/WR_YMWR/B11/20260303/Z_UPAR_I_59134_20260303000000_P_
 # Realtime simulator output files.
 SIM_OUTPUT_DIR = Path('simulated_data')
 
-DATE1 = "2026-05-29"
-DATE2 = "20260529"
+DATE1 = "2026-05-30"
+DATE2 = "20260530"
 NUM = 1
 TRACK_FILE = Path(f'G:/B11/{DATE1}_{NUM}/{DATE2}_{NUM}_B11.csv')
 SCDP_FILE = Path(f'G:/B11/{DATE1}_{NUM}/WR_SCDP/SCDP_B11_{DATE2}.csv')
@@ -43,6 +43,44 @@ TRACK_SIM_SKIP_SECONDS = SIM_SKIP_SECONDS
 HOST = '127.0.0.1'
 PORT = 8000
 AUTO_OPEN_BROWSER = True
+
+# Login and role-based visibility.
+# Replace these example users before field deployment. Passwords may be plain
+# text for local testing or sha256:<hex digest> for less casual exposure.
+AUTH_ENABLED = True
+AUTH_SECRET_KEY = 'change-this-local-session-secret'
+SESSION_TTL_SECONDS = 12 * 60 * 60
+ROLE_PERMISSIONS = {
+    'full': [
+        'view_all',
+        'view_charts',
+        'view_particle_data',
+        'view_mwr_data',
+        'view_local_radar',
+        'view_file_states',
+    ],
+    'lite': [
+        'view_map',
+        'view_replay',
+        'view_weather_overlays',
+        'view_important_points',
+        'use_map_tools',
+    ],
+}
+AUTH_USERS = [
+    {
+        'username': 'admin',
+        'password': 'admin123',
+        'display_name': '全量账号',
+        'role': 'full',
+    },
+    {
+        'username': 'lite',
+        'password': 'lite123',
+        'display_name': '精简账号',
+        'role': 'lite',
+    },
+]
 
 # Map tiles
 # Put offline tiles under this directory using {z}/{x}/{y}.png layout.

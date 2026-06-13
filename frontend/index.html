@@ -10,7 +10,7 @@
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
         crossorigin=""
     >
-    <link rel="stylesheet" href="/static/styles.css?v=20260529-local-radar-20s">
+    <link rel="stylesheet" href="/static/styles.css?v=20260613-lite-local-radar-hide">
 </head>
 <body>
     <header class="topbar">
@@ -27,6 +27,8 @@
             <span class="pill pill-neutral" id="latest-time">最新 --:--:--</span>
             <span class="pill pill-neutral" id="current-date">日期 ----/--/--</span>
             <span class="pill pill-neutral" id="history-limit">历史窗 60min</span>
+            <span class="pill pill-neutral" id="user-role">账号 --</span>
+            <button class="topbar-button" id="logout-btn" type="button">退出</button>
         </div>
     </header>
 
@@ -45,6 +47,16 @@
                     <span>s</span>
                 </label>
                 <button id="apply-window" type="button">应用窗口</button>
+                <label>
+                    <span>数据日期</span>
+                    <input id="data-source-date" type="date">
+                </label>
+                <label>
+                    <span>架次</span>
+                    <input id="data-source-num" type="number" min="1" step="1" value="1">
+                </label>
+                <button id="apply-data-source" type="button">应用日期</button>
+                <span class="rail-note" id="data-source-note">重启后恢复默认日期</span>
             </div>
 
             <div class="rail-section">
@@ -91,19 +103,19 @@
                     <input id="radar-coverage-enabled" type="checkbox">
                     <span>雷达覆盖</span>
                 </label>
-                <label class="toggle">
+                <label class="toggle permission-local-radar">
                     <input id="local-radar-enabled" type="checkbox">
                     <span>叠加本地云雷达</span>
                 </label>
-                <label class="toggle">
+                <label class="toggle permission-local-radar">
                     <input id="local-radar-ppi-enabled" type="checkbox" checked>
                     <span>PPI</span>
                 </label>
-                <label class="toggle">
+                <label class="toggle permission-local-radar">
                     <input id="local-radar-rpi-enabled" type="checkbox" checked>
                     <span>RPI</span>
                 </label>
-                <label class="radar-opacity-wrap">
+                <label class="radar-opacity-wrap permission-local-radar">
                     <span>云雷达透明度</span>
                     <input id="local-radar-opacity" type="range" min="0" max="100" value="72">
                     <span id="local-radar-opacity-value">72%</span>
@@ -161,7 +173,7 @@
                 </label>
             </div>
 
-            <div class="rail-section">
+            <div class="rail-section permission-charts">
                 <div class="rail-title">粒子谱显示</div>
                 <label class="toggle">
                     <input id="show-scdp-bins" type="checkbox" checked>
@@ -186,7 +198,7 @@
                 <div id="track-map"></div>
             </section>
 
-            <section class="timeline-strip" aria-label="时序图表">
+            <section class="timeline-strip permission-charts" aria-label="时序图表">
                 <button class="timeline-cue timeline-cue-left" type="button" aria-label="上一张图">&lt;</button>
                 <section class="panel panel-wide timeline-card">
                     <div class="panel-header">
@@ -220,7 +232,7 @@
             </section>
         </section>
 
-        <section class="right-stack" aria-label="传感器图表">
+        <section class="right-stack permission-charts" aria-label="传感器图表">
             <section class="panel grid-mwr-scalar">
                 <div class="panel-header">
                     <div>
@@ -324,6 +336,6 @@
         crossorigin=""
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
-    <script src="/static/app.js?v=20260529-local-radar-20s"></script>
+    <script src="/static/app.js?v=20260613-lite-local-radar-hide"></script>
 </body>
 </html>

@@ -5,23 +5,57 @@ from io import StringIO
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from config import (
-    ALLOW_SIMULATED_FALLBACK,
-    ICFP_FILE,
-    MWR_FILE,
-    MWR_LEVELS_M,
-    SCDP_FILE,
-    SIM_OUTPUT_DIR,
-    TRACK_COLS,
-    TRACK_FILE,
-)
+import config
 from models import IcfpRecord, MwrRecord, ScdpRecord, TrackRecord
 
-FALLBACK_DATA_DIR = SIM_OUTPUT_DIR
+FALLBACK_DATA_DIR = config.SIM_OUTPUT_DIR
 FALLBACK_TRACK_FILE = FALLBACK_DATA_DIR / 'track_realtime.csv'
 FALLBACK_SCDP_FILE = FALLBACK_DATA_DIR / 'scdp_realtime.csv'
 FALLBACK_ICFP_FILE = FALLBACK_DATA_DIR / 'icfp_realtime.csv'
 FALLBACK_MWR_FILE = FALLBACK_DATA_DIR / 'mwr_realtime.txt'
+DATA_SOURCE_STATE = {}
+
+
+def _build_source_paths(date1: str, num: int) -> Dict[str, object]:
+    date2 = date1.replace('-', '')
+    return {
+        'date1': date1,
+        'date2': date2,
+        'num': int(num),
+        'track_file': Path(f'G:/B11/{date1}_{num}/{date2}_{num}_B11.csv'),
+        'scdp_file': Path(f'G:/B11/{date1}_{num}/WR_SCDP/SCDP_B11_{date2}.csv'),
+        'icfp_file': Path(f'G:/B11/{date1}_{num}/WR_ICFP/ICFP_{date2}_{num}_B11.csv'),
+        'mwr_file': Path(f'G:/B11/{date1}_{num}/WR_YMWR/Z_UPAR_I_59134_{date2}000000_P_YMWR_TK001_CP_D.TXT'),
+    }
+
+
+def set_runtime_data_source(date1: str, num: int) -> Dict[str, object]:
+    DATA_SOURCE_STATE.clear()
+    DATA_SOURCE_STATE.update(_build_source_paths(date1, num))
+    return get_runtime_data_source()
+
+
+def get_runtime_data_source() -> Dict[str, object]:
+    if not DATA_SOURCE_STATE:
+        set_runtime_data_source(config.DATE1, config.NUM)
+    return dict(DATA_SOURCE_STATE)
+
+
+def get_runtime_data_source_payload() -> Dict[str, object]:
+    source = get_runtime_data_source()
+    return {
+        'date1': source['date1'],
+        'date2': source['date2'],
+        'num': source['num'],
+        'default_date1': config.DATE1,
+        'default_date2': config.DATE2,
+        'default_num': config.NUM,
+        'track_file': str(source['track_file']),
+        'scdp_file': str(source['scdp_file']),
+        'icfp_file': str(source['icfp_file']),
+        'mwr_file': str(source['mwr_file']),
+        'persistent': False,
+    }
 
 
 def to_float(value: str) -> Optional[float]:
@@ -64,7 +98,7 @@ def read_appended_lines_if_exists(path, state, encoding='utf-8', fallback_path: 
     active_source = 'primary'
 
     if (
-        ALLOW_SIMULATED_FALLBACK
+        config.ALLOW_SIMULATED_FALLBACK
         and not active_path.exists()
         and fallback_path is not None
         and fallback_path.exists()
@@ -75,7 +109,7 @@ def read_appended_lines_if_exists(path, state, encoding='utf-8', fallback_path: 
     if not active_path.exists():
         if not state.get('missing_warned'):
             print(f'[readers] missing source file: {path}')
-            if not ALLOW_SIMULATED_FALLBACK:
+            if not config.ALLOW_SIMULATED_FALLBACK:
                 print('[readers] simulated fallback disabled (business mode).')
             state['missing_warned'] = True
         state['path_exists'] = False
@@ -117,14 +151,14 @@ def parse_track_line(line: str) -> Optional[TrackRecord]:
     if len(row) < 16:
         return None
     try:
-        date_text = row[TRACK_COLS['date']].strip()
-        time_text = row[TRACK_COLS['time']].strip()
+        date_text = row[config.TRACK_COLS['date']].strip()
+        time_text = row[config.TRACK_COLS['time']].strip()
         if not date_text or not time_text:
             return None
         dt = datetime.strptime(f"{date_text} {time_text}", '%Y%m%d %H:%M:%S')
-        lon = to_float(row[TRACK_COLS['lon']])
-        lat = to_float(row[TRACK_COLS['lat']])
-        alt_m = to_float(row[TRACK_COLS['alt']])
+        lon = to_float(row[config.TRACK_COLS['lon']])
+        lat = to_float(row[config.TRACK_COLS['lat']])
+        alt_m = to_float(row[config.TRACK_COLS['alt']])
         if lon is None or lat is None or alt_m is None:
             return None
         return TrackRecord(
@@ -132,8 +166,8 @@ def parse_track_line(line: str) -> Optional[TrackRecord]:
             lon=lon,
             lat=lat,
             alt_m=alt_m,
-            speed=to_float(row[TRACK_COLS['speed']]),
-            heading=to_float(row[TRACK_COLS['heading']]),
+            speed=to_float(row[config.TRACK_COLS['speed']]),
+            heading=to_float(row[config.TRACK_COLS['heading']]),
         )
     except Exception:
         return None
@@ -193,11 +227,11 @@ def _build_mwr_record_from_group(group: Dict) -> MwrRecord:
         cloud_base_km=group.get('cloud_base_km'),
         vint_mm=group.get('vint_mm'),
         lqint_mm=group.get('lqint_mm'),
-        levels_m=MWR_LEVELS_M[:],
-        temperature_profile=group.get('11', [None] * len(MWR_LEVELS_M)),
-        vapor_density_profile=group.get('12', [None] * len(MWR_LEVELS_M)),
-        humidity_profile=group.get('13', [None] * len(MWR_LEVELS_M)),
-        liquid_water_profile=group.get('14', [None] * len(MWR_LEVELS_M)),
+        levels_m=config.MWR_LEVELS_M[:],
+        temperature_profile=group.get('11', [None] * len(config.MWR_LEVELS_M)),
+        vapor_density_profile=group.get('12', [None] * len(config.MWR_LEVELS_M)),
+        humidity_profile=group.get('13', [None] * len(config.MWR_LEVELS_M)),
+        liquid_water_profile=group.get('14', [None] * len(config.MWR_LEVELS_M)),
         status='ok' if all(k in group for k in ('11', '12', '13', '14')) else 'partial',
     )
 
@@ -214,7 +248,7 @@ def parse_mwr_line(line: str, column_map: Dict[str, int], pending: Dict) -> Opti
             return None
 
         profile = []
-        for level_m in MWR_LEVELS_M:
+        for level_m in config.MWR_LEVELS_M:
             profile.append(to_float(row[column_map[_km_col_name(level_m)]]))
 
         group = pending.setdefault(dt, {
@@ -277,7 +311,7 @@ def _build_header_map(header_row: List[str], source: str) -> Dict[str, int]:
         header_map['CloudBase(km)'] = header_row.index('CloudBase(km)')
         header_map['Vint(mm)'] = header_row.index('Vint(mm)')
         header_map['Lqint(mm)'] = header_row.index('Lqint(mm)')
-        for level_m in MWR_LEVELS_M:
+        for level_m in config.MWR_LEVELS_M:
             key = _km_col_name(level_m)
             header_map[key] = header_row.index(key)
     return header_map
@@ -294,8 +328,9 @@ def _safe_build_header_map(header_row: List[str], source: str) -> Optional[Dict[
 
 def poll_track(store, arrival_at: datetime):
     state = store.file_states['track']
+    source = get_runtime_data_source()
     lines = read_appended_lines_if_exists(
-        TRACK_FILE,
+        source['track_file'],
         state,
         encoding='utf-8',
         fallback_path=FALLBACK_TRACK_FILE,
@@ -310,8 +345,9 @@ def poll_track(store, arrival_at: datetime):
 
 def poll_scdp(store):
     state = store.file_states['scdp']
+    source = get_runtime_data_source()
     lines = read_appended_lines_if_exists(
-        SCDP_FILE,
+        source['scdp_file'],
         state,
         encoding='utf-8',
         fallback_path=FALLBACK_SCDP_FILE,
@@ -337,8 +373,9 @@ def poll_scdp(store):
 def poll_icfp(store):
     state = store.file_states['icfp']
     records = []
+    source = get_runtime_data_source()
     lines = read_appended_lines_if_exists(
-        ICFP_FILE,
+        source['icfp_file'],
         state,
         encoding='utf-8',
         fallback_path=FALLBACK_ICFP_FILE,
@@ -363,8 +400,9 @@ def poll_icfp(store):
 
 def poll_mwr(store, arrival_at: datetime) -> List[MwrRecord]:
     state = store.file_states['mwr']
+    source = get_runtime_data_source()
     lines = read_appended_lines_if_exists(
-        MWR_FILE,
+        source['mwr_file'],
         state,
         encoding='utf-8',
         fallback_path=FALLBACK_MWR_FILE,
