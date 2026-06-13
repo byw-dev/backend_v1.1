@@ -46,8 +46,27 @@ python launcher.py
 - **雷达与卫星叠加**：支持 RainViewer 全球雷达、RainViewer 覆盖范围、Himawari-9 云图、本地云雷达 PPI/RPI。
 - **本地云雷达**：从 `PPICMA` / `RPICMA` 目录读取 CMA/Z_RADA 径向基数据，按最新文件叠加到地图，PPI 在下层、RPI 在上层，带 dBZ 色标和扫描时间显示。
 - **登录与权限分区**：支持内置账号、全量视图和精简视图。全量账号可查看全部图表和本地云雷达；精简账号使用接近 `backend_lite` 的大地图态势界面，并隐藏本地云雷达控件，后端 API 与 WebSocket 同步过滤 SCDP/ICFP/MWR 数据。
+- **运行时日期/架次切换**：full 与 lite 账号都可在页面临时切换数据日期和架次；切换会清空前后端已加载缓存并按新路径读取，但不会写回 `config.py`，重启后仍使用默认日期和架次。
 - **交互工具**：支持历史回放、地图点击选帧、测距、锚点、锚点表格和 TXT 导出、区域边界提示。
 - **图表展示**：展示 SCDP/ICFP 时序和 bins，MWR 标量、温度/湿度/水汽密度/液态水廓线，以及饱和区热力图。
+
+## 登录与权限
+
+默认启用登录。内置账号在 [config.py](./config.py) 的 `AUTH_USERS` 中配置，角色权限在 `ROLE_PERMISSIONS` 中配置。
+
+默认账号：
+
+| 用户名 | 密码 | 角色 | 界面与数据权限 |
+| --- | --- | --- | --- |
+| `admin` | `admin123` | `full` | 查看完整界面、全部图表、本地云雷达 PPI/RPI、完整 API/WebSocket 数据。 |
+| `lite` | `lite123` | `lite` | 使用接近 `backend_lite` 的大地图态势界面；隐藏时序图、右侧图表、本地云雷达总开关、PPI、RPI、云雷达透明度、地图状态控件和色标；后端同步过滤 SCDP/ICFP/MWR 和本地云雷达接口。 |
+
+权限控制同时发生在前端和后端：
+
+- 前端根据 `/api/me` 返回的权限切换 full/lite 布局。
+- 本地云雷达控件默认隐藏，只有具备 `view_local_radar` 权限时才显示，避免 Lite 页面加载早期露出控件。
+- Lite 账号不会请求 `/api/local-radar/latest`；即使直接访问该接口，后端也会返回 `403`。
+- WebSocket 推送会按当前登录账号过滤数据，Lite 账号只接收允许查看的内容。
 
 ## 核心目录
 
@@ -133,7 +152,7 @@ D:\APP\radar_uploader_split\downloads\20260529\RPICMA
 - `GET /api/map-config`：返回底图、全球雷达、本地云雷达、Himawari 等地图配置。
 - `GET /api/data-source`、`POST /api/data-source`：查看或临时切换当前运行时数据日期和架次，不持久化。
 - `GET /api/himawari/latest`：返回最新 Himawari 图层元数据。
-- `GET /api/local-radar/latest?product=PPI`：读取并返回最新本地云雷达 PPI/RPI 极坐标数据。
+- `GET /api/local-radar/latest?product=PPI`：读取并返回最新本地云雷达 PPI/RPI 极坐标数据，仅具备 `view_local_radar` 权限的账号可访问。
 - `GET /api/important-points`：返回重点点位、重点路径、探测半径和方位线配置。
 - `POST /api/login`、`POST /api/logout`、`GET /api/me`：登录、退出和当前账号权限。
 - `WS /ws/realtime`：实时推送 `AlignedFrame`。
@@ -144,6 +163,7 @@ D:\APP\radar_uploader_split\downloads\20260529\RPICMA
 
 - 总开关关闭时不读取本地云雷达。
 - 总开关开启后，按 PPI/RPI 勾选状态分别请求最新数据。
+- 仅 full 账号可看到并使用本地云雷达控件；lite 账号前端隐藏相关控件，后端接口同步拒绝访问。
 - 后端按文件名时间选择最新 `.zip` 文件。
 - PPI 和 RPI 可同时叠加，PPI 在下层，RPI 在上层。
 - 地图左下角显示读取到的扫描时间，格式为 `HH:mm`。
