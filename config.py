@@ -1,4 +1,19 @@
+import os
 from pathlib import Path
+
+# Env-driven overrides (set via .env in deployment)
+# Uvicorn also reads HOST / PORT / FORWARDED_ALLOW_IPS natively when
+# launched via `uvicorn app:app` — but config.py values are used when
+# the app runs via app.py / launcher.py directly.
+
+_env_host = os.getenv('HOST')
+_env_port = os.getenv('PORT')
+_env_data_base = os.getenv('BACKEND_DATA_BASE_DIR')
+_env_date1 = os.getenv('BACKEND_DATE1')
+_env_num = os.getenv('BACKEND_NUM')
+_env_fallback = os.getenv('BACKEND_ALLOW_SIMULATED_FALLBACK')
+_env_secret = os.getenv('BACKEND_AUTH_SECRET_KEY')
+_env_radar_base = os.getenv('BACKEND_LOCAL_RADAR_BASE_DIR')
 
 # Source files used by the realtime simulator.
 SOURCE_TRACK_FILE = Path('G:/B11/2026-03-03_1/20260303_1_B11.csv')
@@ -9,18 +24,24 @@ SOURCE_MWR_FILE = Path('G:/WR_YMWR/B11/20260303/Z_UPAR_I_59134_20260303000000_P_
 # Realtime simulator output files.
 SIM_OUTPUT_DIR = Path('simulated_data')
 
-DATE1 = "2026-05-30"
-DATE2 = "20260530"
-NUM = 1
-TRACK_FILE = Path(f'G:/B11/{DATE1}_{NUM}/{DATE2}_{NUM}_B11.csv')
-SCDP_FILE = Path(f'G:/B11/{DATE1}_{NUM}/WR_SCDP/SCDP_B11_{DATE2}.csv')
-ICFP_FILE = Path(f'G:/B11/{DATE1}_{NUM}/WR_ICFP/ICFP_{DATE2}_{NUM}_B11.csv')
-MWR_FILE = Path(f'G:/B11/{DATE1}_{NUM}/WR_YMWR/Z_UPAR_I_59134_{DATE2}000000_P_YMWR_TK001_CP_D.TXT')
+# Business data paths
+DATE1 = _env_date1 or "2026-05-30"
+DATE2 = DATE1.replace('-', '')
+NUM = int(_env_num) if _env_num else 1
+
+if _env_data_base:
+    DATA_BASE_DIR = Path(_env_data_base)
+else:
+    DATA_BASE_DIR = Path(f'G:/B11')
+
+TRACK_FILE = DATA_BASE_DIR / f'{DATE1}_{NUM}' / f'{DATE2}_{NUM}_B11.csv'
+SCDP_FILE = DATA_BASE_DIR / f'{DATE1}_{NUM}' / 'WR_SCDP' / f'SCDP_B11_{DATE2}.csv'
+ICFP_FILE = DATA_BASE_DIR / f'{DATE1}_{NUM}' / 'WR_ICFP' / f'ICFP_{DATE2}_{NUM}_B11.csv'
+MWR_FILE = DATA_BASE_DIR / f'{DATE1}_{NUM}' / 'WR_YMWR' / f'Z_UPAR_I_59134_{DATE2}000000_P_YMWR_TK001_CP_D.TXT'
 
 # Data source policy
-# False: business mode (strictly read realtime business files only)
-# True: non-business mode (allow fallback to simulated_data when primary file is missing)
-ALLOW_SIMULATED_FALLBACK = False
+ALLOW_SIMULATED_FALLBACK = (_env_fallback or 'false').lower() in ('1', 'true', 'yes')
+
 # Runtime behavior
 POLL_INTERVAL_SEC = 0.5
 ALIGN_DELAY_SEC = 2.0
@@ -34,21 +55,17 @@ SCDP_SIM_INTERVAL_SEC = 1.0
 ICFP_SIM_INTERVAL_SEC = 1.0
 MWR_SIM_INTERVAL_SEC = 15.0
 SIM_RANDOM_JITTER_SEC = 0.25
-# Skip first M seconds of source data when simulator starts.
 SIM_SKIP_SECONDS = 0
-# Backward-compatible alias for older references.
 TRACK_SIM_SKIP_SECONDS = SIM_SKIP_SECONDS
 
 # Network
-HOST = '127.0.0.1'
-PORT = 8000
+HOST = _env_host or '127.0.0.1'
+PORT = int(_env_port) if _env_port else 8000
 AUTO_OPEN_BROWSER = True
 
-# Login and role-based visibility.
-# Replace these example users before field deployment. Passwords may be plain
-# text for local testing or sha256:<hex digest> for less casual exposure.
+# Auth
 AUTH_ENABLED = True
-AUTH_SECRET_KEY = 'change-this-local-session-secret'
+AUTH_SECRET_KEY = _env_secret or 'change-this-local-session-secret'
 SESSION_TTL_SECONDS = 12 * 60 * 60
 ROLE_PERMISSIONS = {
     'full': [
@@ -83,7 +100,6 @@ AUTH_USERS = [
 ]
 
 # Map tiles
-# Put offline tiles under this directory using {z}/{x}/{y}.png layout.
 MAP_TILES_DIR = Path('map_tiles')
 MAP_LOCAL_URL_TEMPLATE = '/tiles/{z}/{x}/{y}.png'
 MAP_ONLINE_URL_TEMPLATE = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
@@ -100,8 +116,8 @@ RAINVIEWER_COLOR_SCHEME = 2
 RAINVIEWER_SMOOTH = 1
 RAINVIEWER_SNOW = 1
 
-# Local cloud radar polar overlay.
-LOCAL_RADAR_BASE_DIR = Path(r'D:/APP/radar_uploader_split/downloads') / DATE2
+# Local cloud radar
+LOCAL_RADAR_BASE_DIR = Path(_env_radar_base).expanduser() if _env_radar_base else Path(r'D:/APP/radar_uploader_split/downloads') / DATE2
 LOCAL_RADAR_PRODUCTS = ['PPI', 'RPI']
 LOCAL_RADAR_DEFAULT_PRODUCT = 'PPI'
 LOCAL_RADAR_VARIABLE = 'Z2'
@@ -115,6 +131,7 @@ LOCAL_RADAR_LAT = 20.96194444
 LOCAL_RADAR_LON = 110.06777778
 LOCAL_RADAR_SITE_NAME = '雷州云雷达'
 
+# Himawari
 HIMAWARI_FD_TARGET_TIMES_URL = 'https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes_fd.json'
 HIMAWARI_JP_TARGET_TIMES_URL = 'https://www.jma.go.jp/bosai/himawari/data/satimg/targetTimes_jp.json'
 HIMAWARI_FD_TILE_URL_TEMPLATE = 'https://www.jma.go.jp/bosai/himawari/data/satimg/{base_time}/fd/{valid_time}/{band}/{product}/{z}/{x}/{y}.{format}'
@@ -139,7 +156,7 @@ HIMAWARI_PRODUCTS = [
 ]
 IMPORTANT_POINTS_FILE = Path('reference/important_points.json')
 
-# Track fixed-column mapping
+# Track column mapping
 TRACK_COLS = {
     'date': 2,
     'time': 3,
@@ -150,7 +167,7 @@ TRACK_COLS = {
     'heading': 14,
 }
 
-# MWR 0-1 km levels to keep
+# MWR levels to keep
 MWR_LEVELS_M = [
     0, 25, 50, 75, 100, 125, 150, 175, 200, 225,
     250, 275, 300, 325, 350, 375, 400, 425, 450, 475,

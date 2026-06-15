@@ -295,6 +295,12 @@ $RECYCLE.BIN/
 # ignore data directory
 data/
 
+# Build artifacts
+dist/*.tar.gz
+
+# Runtime
+logs/
+
 # ignore .pyc
 __pycache__/
 *.pyc

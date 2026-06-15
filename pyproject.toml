@@ -1,0 +1,22 @@
+[project]
+name = "backend-v1"
+version = "1.1.0"
+description = "BY Weather Backend — UAV meteorological observation real-time visualization"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.116",
+    "uvicorn>=0.35",
+    "numpy>=1.26",
+    "scipy>=1.13",
+    "matplotlib>=3.9",
+    "pandas>=2.3",
+    "xarray>=2023.6",
+    "requests>=2.32",
+]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[tool.setuptools.packages.find]
+include = ["backend_v1*"]

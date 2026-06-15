@@ -22,10 +22,10 @@ def _build_source_paths(date1: str, num: int) -> Dict[str, object]:
         'date1': date1,
         'date2': date2,
         'num': int(num),
-        'track_file': Path(f'G:/B11/{date1}_{num}/{date2}_{num}_B11.csv'),
-        'scdp_file': Path(f'G:/B11/{date1}_{num}/WR_SCDP/SCDP_B11_{date2}.csv'),
-        'icfp_file': Path(f'G:/B11/{date1}_{num}/WR_ICFP/ICFP_{date2}_{num}_B11.csv'),
-        'mwr_file': Path(f'G:/B11/{date1}_{num}/WR_YMWR/Z_UPAR_I_59134_{date2}000000_P_YMWR_TK001_CP_D.TXT'),
+        'track_file': config.DATA_BASE_DIR / f'{date1}_{num}' / f'{date2}_{num}_B11.csv',
+        'scdp_file': config.DATA_BASE_DIR / f'{date1}_{num}' / 'WR_SCDP' / f'SCDP_B11_{date2}.csv',
+        'icfp_file': config.DATA_BASE_DIR / f'{date1}_{num}' / 'WR_ICFP' / f'ICFP_{date2}_{num}_B11.csv',
+        'mwr_file': config.DATA_BASE_DIR / f'{date1}_{num}' / 'WR_YMWR' / f'Z_UPAR_I_59134_{date2}000000_P_YMWR_TK001_CP_D.TXT',
     }
 
 

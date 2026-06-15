@@ -1,0 +1,15 @@
+[Unit]
+Description=Backend V1 FastAPI service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__VENV_DIR__/bin/uvicorn app:app
+EnvironmentFile=__INSTALL_DIR__/.env
+Environment=PYTHONUNBUFFERED=1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
