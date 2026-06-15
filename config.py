@@ -2,9 +2,14 @@ import os
 from pathlib import Path
 
 # Env-driven overrides (set via .env in deployment)
-# Uvicorn also reads HOST / PORT / FORWARDED_ALLOW_IPS natively when
-# launched via `uvicorn app:app` — but config.py values are used when
-# the app runs via app.py / launcher.py directly.
+#
+# When the service runs via `uvicorn app:app` CLI (systemd mode),
+# uvicorn reads UVICORN_HOST, UVICORN_PORT and FORWARDED_ALLOW_IPS
+# from the environment natively — set those in .env.
+#
+# When the app runs via `python app.py` or `python launcher.py`
+# (development mode), config.HOST and config.PORT are used directly
+# — they also fall back to plain HOST/PORT env vars for convenience.
 
 _env_host = os.getenv('HOST')
 _env_port = os.getenv('PORT')
